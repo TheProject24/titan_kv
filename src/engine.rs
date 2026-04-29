@@ -1,8 +1,8 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 
-pub type Db = Arc<Mutex<HashMap<String, String>>>;
+pub type Db = Arc<RwLock<HashMap<String, String>>>;
 
 pub fn new_db() -> Db {
-    Arc::new(Mutex::new(HashMap::new()))
+    Arc::new(RwLock::new(HashMap::new()))
 }
