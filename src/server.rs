@@ -1,7 +1,7 @@
 use std::net::{TcpListener, TcpStream};
 use std::io::{BufRead, BufReader, Write, Read};
 use std::sync::Arc;
-// use std::thread;
+use std::fs::OpenOptions;
 
 use crate::engine::Db;
 use crate::protocol::{parse_command, Command}; 
@@ -36,7 +36,17 @@ fn handle_connection(mut stream: TcpStream, db: Db) {
                     }
                     Command::Set(key, value) => {
                         let mut map = db.write().unwrap();
-                        map.insert(key, value);
+                        map.insert(key.clone(), value.clone());
+
+                        let mut file = OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open("database.aof")
+                            .unwrap();
+
+                        let log = format!("SET {} {}\n", key, value);
+                        file.write_all(log.as_bytes()).unwrap();
+
                         stream.write_all(b"+OK\r\n").unwrap();
                     }
                     Command::Get(key) => {
@@ -60,9 +70,9 @@ fn handle_connection(mut stream: TcpStream, db: Db) {
                 eprintln!("Error reading from stream: {}", e);
                 break;
             }
+            }
         }
     }
-}
 
 pub fn run(address: &str, db: Db) {
     let listener = TcpListener::bind(address).expect("Could not bind to address");
