@@ -1,3 +1,5 @@
+// use core::num;
+// use std::fmt::format;
 use std::net::{TcpListener, TcpStream};
 use std::io::{BufRead, BufReader, Write, Read};
 use std::sync::Arc;
@@ -60,6 +62,61 @@ fn handle_connection(mut stream: TcpStream, db: Db) {
                                 stream.write_all(b"$-1\r\n").unwrap();
                             }
                         }
+                    }
+                    Command::Del(key) => {
+                        let mut map = db.write().unwrap();
+                        if map.remove(&key).is_some() {
+                            let mut file = OpenOptions::new()
+                                .create(true)
+                                .append(true)
+                                .open("database.aof")
+                                .unwrap();
+
+                            let log = format!("DEL {}\n", key);
+                            file.write_all(log.as_bytes()).unwrap();
+
+                            stream.write_all(log.as_bytes()).unwrap();
+                        } else {
+                            stream.write_all(b"+0\r\n").unwrap();
+                        }
+                    }
+                    Command::Exists(key) => {
+                        let map = db.read().unwrap();
+
+                        if map.contains_key(&key) {
+                            stream.write_all(b"+1\r\n").unwrap();
+                        } else {
+                            stream.write_all(b"+0\r\n").unwrap();
+                        }
+                    }
+                    Command::Incr(key) => {
+                        let mut map = db.write().unwrap();
+                        let current_number = match map.get(&key) {
+                            Some(value_string) => {
+                                match value_string.parse::<i64>() {
+                                    Ok(num) => num,
+                                    Err(_) => {
+                                        stream.write_all(b"-Error, value is not an integer or out of range\r\n").unwrap();
+                                        return;
+                                    }
+                                }
+                            }
+                            None => 0,
+                        };
+                        let new_num = current_number + 1;
+                        map.insert(key.clone(), new_num.to_string());
+                                    
+                        let mut file = OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open("database.aof")
+                            .unwrap();
+
+                        let log = format!("INCR {}\n", key);
+                        file.write_all(log.as_bytes()).unwrap();
+
+                        let response = format!("+{}\r\n", new_num);
+                        stream.write_all(response.as_bytes()).unwrap();
                     }
                     Command::Unknown => {
                         stream.write_all(b"-ERR unknown command\r\n").unwrap();
