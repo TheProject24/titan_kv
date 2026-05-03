@@ -3,16 +3,19 @@ mod protocol;
 mod engine;
 pub mod thread_pool;
 
+use std::time::{SystemTime, Duration};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
+use crate::engine::Entry;
 use crate::protocol::{parse_command, Command};
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let db = engine::new_db();
 
     if let Ok(file) = File::open("database.aof") {
         let reader = BufReader::new(file);
-        let mut map = db.write().unwrap();
+        let mut map = db.write().await;
         let mut count = 0;
 
         for line in reader.lines() {
@@ -21,7 +24,11 @@ fn main() {
 
                 match command {
                     Command::Set(k, v) => {
-                        map.insert(k, v);
+                        let entry = Entry {
+                            value: v,
+                            expires_at: None
+                        };
+                        map.insert(k, entry);
                         count += 1;
                     },
                     Command::Del(k) => {
@@ -30,23 +37,35 @@ fn main() {
                     }
                     Command::Incr(k) => {
                         let current = match map.get(&k) {
-                            Some(value_string) => value_string.parse::<i64>().unwrap_or(0),
+                            Some(entry) => entry.value.parse::<i64>().unwrap_or(0),
                             None => 0,
                         };
 
-                        map.insert(k, (current + 1).to_string());
+                        let entry = Entry {
+                            value: (current + 1).to_string(),
+                            expires_at: None
+                        };
+
+                        map.insert(k, entry);
+                        count += 1;
+                    }
+                    Command::SetEx(k, s, v) => {
+                        let expiration_time  = SystemTime::now() + Duration::from_secs(s as u64);
+
+                        let new_entry = Entry {
+                            value: v,
+                            expires_at: Some(expiration_time),
+                        };
+
+                        map.insert(k.clone(), new_entry);
                         count += 1;
                     }
                     _ => {}
                 }
-                // if let Command::Set(key, value) = command {
-                //     map.insert(key, value);
-                //     count += 1;
-                // }
             }
         }
         println!("AOF Replay Complete: Restored {} keys to memory.", count);
     }
     let address = "127.0.0.1:6379";
-    server::run(address, db);
+    server::run(address, db).await;
 }

@@ -8,6 +8,7 @@ pub enum Command {
     Del(String),
     Exists(String),
     Incr(String),
+    SetEx(String, i64, String),
     Unknown
 }
 
@@ -49,6 +50,16 @@ pub fn parse_command(input: &str) -> Command {
         "INCR" => {
             if parts.len() == 2 {
                 Command::Incr(parts[1].to_string())
+            } else {
+                Command::Unknown
+            }
+        }
+        "SETEX" => {
+            if parts.len() == 4 {
+                match parts[2].parse::<i64>() {
+                    Ok(seconds) => Command::SetEx(parts[1].to_string(), seconds, parts[3].to_string()),
+                    Err(_) => Command::Unknown,
+                }
             } else {
                 Command::Unknown
             }

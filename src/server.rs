@@ -1,24 +1,25 @@
-// use core::num;
-// use std::fmt::format;
-use std::net::{TcpListener, TcpStream};
-use std::io::{BufRead, BufReader, Write, Read};
+use std::time::Duration;
+use tokio::net::{TcpListener, TcpStream};
+use tokio::io::{AsyncReadExt, AsyncWriteExt, AsyncBufReadExt, BufReader};
+use tokio::fs::OpenOptions;
 use std::sync::Arc;
-use std::fs::OpenOptions;
+use std::time::SystemTime;
 
-use crate::engine::Db;
+use crate::engine::{Db, Entry};
 use crate::protocol::{parse_command, Command}; 
-use crate::thread_pool::ThreadPool;
+// use crate::thread_pool::ThreadPool;
 
-fn handle_connection(mut stream: TcpStream, db: Db) {
-    let mut reader = BufReader::new(stream.try_clone().unwrap());
+async fn handle_connection(stream: TcpStream, db: Db) {
+    let (read_half, mut stream) = stream.into_split();
+    let mut reader = BufReader::new(read_half);
     let mut line = String::new();
 
     loop {
         line.clear();
         
-        let mut cage = reader.by_ref().take(1024);
+        let mut cage = (&mut reader).take(1024);
 
-        match cage.read_line(&mut line) {
+        match cage.read_line(&mut line).await {
             Ok(0) => {
                 println!("Client disconnected.");
                 break;
@@ -33,93 +34,160 @@ fn handle_connection(mut stream: TcpStream, db: Db) {
                 println!("Parsed Command: {:?}", command);
 
                 match command {
-                    Command::Ping => {
-                        stream.write_all(b"+PONG\r\n").unwrap();
-                    }
-                    Command::Set(key, value) => {
-                        let mut map = db.write().unwrap();
-                        map.insert(key.clone(), value.clone());
+                    Command::SetEx(key, seconds, value) => {
+                        let expiration_time  = SystemTime::now() + Duration::from_secs(seconds as u64);
+
+                        let new_entry = Entry {
+                            value: value.clone(),
+                            expires_at: Some(expiration_time),
+                        };
+
+                        let mut map = db.write().await;
+                        map.insert(key.clone(), new_entry);
+
+                        
 
                         let mut file = OpenOptions::new()
                             .create(true)
                             .append(true)
                             .open("database.aof")
+                            .await
+                            .unwrap();
+
+                        let log = format!("SETEX {} {} {}\n", key, seconds, value);
+                        file.write_all(log.as_bytes()).await.unwrap();
+                    }
+                    Command::Ping => {
+                        stream.write_all(b"+PONG\r\n").await.unwrap();
+                    }
+                    Command::Set(key, value) => {
+                        let mut map = db.write().await;
+                        let new_entry = Entry{
+                            value: value.clone(),
+                            expires_at: None,
+                        };
+                        map.insert(key.clone(), new_entry);
+
+                        
+
+                        let mut file = OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open("database.aof")
+                            .await
                             .unwrap();
 
                         let log = format!("SET {} {}\n", key, value);
-                        file.write_all(log.as_bytes()).unwrap();
+                        file.write_all(log.as_bytes()).await.unwrap();
 
-                        stream.write_all(b"+OK\r\n").unwrap();
+                        stream.write_all(b"+OK\r\n").await.unwrap();
                     }
                     Command::Get(key) => {
-                        let map = db.read().unwrap();
+                        let mut map = db.write().await;
+
                         match map.get(&key) {
-                            Some(value) => {
-                                let response = format!("+{}\r\n", value);
-                                stream.write_all(response.as_bytes()).unwrap();
+                            Some(entry) => {
+                                if let Some(expiration) = entry.expires_at {
+                                    if SystemTime::now() > expiration {
+                                        if map.remove(&key).is_some() {
+                                            
+
+                                            let mut file = OpenOptions::new()
+                                                .create(true)
+                                                .append(true)
+                                                .open("database.aof")
+                                                .await
+                                                .unwrap();
+
+                                                let log = format!("DEL {}\n", key);
+                                                file.write_all(log.as_bytes()).await.unwrap();
+
+                                                stream.write_all(b"$-1\r\n").await.unwrap();
+                                        };
+
+
+                                        continue
+                                    }
+                                }
+                                let response = format!("+{}\r\n", entry.value);
+                                stream.write_all(response.as_bytes()).await.unwrap();
                             }
                             None => {
-                                stream.write_all(b"$-1\r\n").unwrap();
+                                
+                                stream.write_all(b"$-1\r\n").await.unwrap();
                             }
                         }
                     }
                     Command::Del(key) => {
-                        let mut map = db.write().unwrap();
-                        if map.remove(&key).is_some() {
+                        let mut map = db.write().await;
+                        let not_there = map.remove(&key).is_some();
+
+                        
+                        if not_there {
                             let mut file = OpenOptions::new()
                                 .create(true)
                                 .append(true)
                                 .open("database.aof")
+                                .await
                                 .unwrap();
 
                             let log = format!("DEL {}\n", key);
-                            file.write_all(log.as_bytes()).unwrap();
-
-                            stream.write_all(log.as_bytes()).unwrap();
+                            file.write_all(log.as_bytes()).await.unwrap();   
+                            stream.write_all(b"+1\r\n").await.unwrap();
                         } else {
-                            stream.write_all(b"+0\r\n").unwrap();
+                            stream.write_all(b"+0\r\n").await.unwrap();
                         }
                     }
                     Command::Exists(key) => {
-                        let map = db.read().unwrap();
+                        let map = db.read().await;
 
-                        if map.contains_key(&key) {
-                            stream.write_all(b"+1\r\n").unwrap();
+                        let key_exists = map.contains_key(&key);
+                        
+                        
+
+                        if key_exists {
+                            stream.write_all(b"+1\r\n").await.unwrap();
                         } else {
-                            stream.write_all(b"+0\r\n").unwrap();
+                            stream.write_all(b"+0\r\n").await.unwrap();
                         }
                     }
                     Command::Incr(key) => {
-                        let mut map = db.write().unwrap();
+                        let mut map = db.write().await;
                         let current_number = match map.get(&key) {
-                            Some(value_string) => {
-                                match value_string.parse::<i64>() {
+                            Some(entry) => {
+                                match entry.value.parse::<i64>() {
                                     Ok(num) => num,
                                     Err(_) => {
-                                        stream.write_all(b"-Error, value is not an integer or out of range\r\n").unwrap();
-                                        return;
+                                        
+                                        stream.write_all(b"-Error, value is not an integer or out of range\r\n").await.unwrap();
+                                        continue
                                     }
                                 }
                             }
                             None => 0,
                         };
                         let new_num = current_number + 1;
-                        map.insert(key.clone(), new_num.to_string());
-                                    
+                        let new_entry = Entry{
+                            value: new_num.to_string(),
+                            expires_at: None,
+                        };
+                        map.insert(key.clone(), new_entry);
+                        
                         let mut file = OpenOptions::new()
                             .create(true)
                             .append(true)
                             .open("database.aof")
+                            .await
                             .unwrap();
 
                         let log = format!("INCR {}\n", key);
-                        file.write_all(log.as_bytes()).unwrap();
+                        file.write_all(log.as_bytes()).await.unwrap();
 
                         let response = format!("+{}\r\n", new_num);
-                        stream.write_all(response.as_bytes()).unwrap();
+                        stream.write_all(response.as_bytes()).await.unwrap();
                     }
                     Command::Unknown => {
-                        stream.write_all(b"-ERR unknown command\r\n").unwrap();
+                        stream.write_all(b"-ERR unknown command\r\n").await.unwrap();
                     }
                 }
             }
@@ -131,24 +199,22 @@ fn handle_connection(mut stream: TcpStream, db: Db) {
         }
     }
 
-pub fn run(address: &str, db: Db) {
-    let listener = TcpListener::bind(address).expect("Could not bind to address");
+pub async fn run(address: &str, db: Db) {
+    let listener = TcpListener::bind(address).await.expect("Could not bind to address");
     println!("Titan KV listening on {}", address);
 
-    let pool = ThreadPool::new(4);
-
-    for stream in listener.incoming() {
-        match stream {
-            Ok(s) => {
+    loop {
+        match listener.accept().await {
+            Ok((stream, _socket_addr)) => {
                 let db_handle = Arc::clone(&db);
-                
-                pool.execute(move || {
-                    handle_connection(s, db_handle);
-                })
+
+                tokio::spawn(async move {
+                    handle_connection(stream, db_handle).await;   
+                });
             }
             Err(e) => {
-                eprintln!("Connection failed: {}", e);
-            }
-        }
+                eprintln!("Connection Failed: {}", e)
+            },
+        };
     }
 }
