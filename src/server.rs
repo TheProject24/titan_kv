@@ -56,6 +56,7 @@ async fn handle_connection(stream: TcpStream, db: Db) {
 
                         let log = format!("SETEX {} {} {}\n", key, seconds, value);
                         file.write_all(log.as_bytes()).await.unwrap();
+                        stream.write_all(b"+OK\r\n").await.unwrap();
                     }
                     Command::Ping => {
                         stream.write_all(b"+PONG\r\n").await.unwrap();
