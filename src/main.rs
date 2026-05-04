@@ -1,7 +1,10 @@
+// src/main.rs
+
 mod server;
 mod protocol;
 mod engine;
 pub mod thread_pool;
+mod pubsub;
 
 use std::time::{SystemTime, Duration};
 use std::fs::File;
@@ -21,7 +24,9 @@ async fn main() {
 
         for line in reader.lines() {
             if let Ok(content) = line {
-                let command = parse_command(&content);
+                let parts: Vec<String> = content.split_whitespace().map(|s| s.to_string()).collect();
+
+                let command = parse_command(&parts);
 
                 match command {
                     Command::Set(k, v) => {
@@ -137,5 +142,6 @@ async fn main() {
     });
 
     let address = "127.0.0.1:6379";
-    server::run(address, db).await;
+    let pubsub = pubsub::new_pubsub();
+    server::run(address, db, pubsub).await;
 }
