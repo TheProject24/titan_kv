@@ -12,7 +12,11 @@ pub enum Command {
     Publish(String, String),
     Subscribe(String),
     Unsubscribe(String),
-    Unknown
+    LPush(String, String),
+    LPop(String),
+    HSet(String, String, String),
+    // HGet(String, String),
+    Unknown,
 }
 
 pub fn parse_command(parts: &[String]) -> Command {
@@ -36,6 +40,40 @@ pub fn parse_command(parts: &[String]) -> Command {
         "PUBLISH" if parts.len() == 3 => Command::Publish(parts[1].clone(), parts[2].clone()),
         "SUBSCRIBE" if parts.len() == 2 => Command::Subscribe(parts[1].clone()),
         "UNSUBSCRIBE" if parts.len() == 2 => Command::Unsubscribe(parts[1].clone()),
-        _ => Command::Unknown
+        "LPUSH" if parts.len() == 3 => Command::LPush(parts[1].clone(), parts[2].clone()),
+        "LPOP" if parts.len() == 2 => Command::LPop(parts[1].clone()),
+        "HSET" if parts.len() == 4 =>
+            Command::HSet(parts[1].clone(), parts[2].clone(), parts[3].clone()),
+        // "HGET" if parts.len() == 3 => Command::HGet(parts[1].clone(), parts[2].clone()),
+        _ => Command::Unknown,
     }
+}
+
+pub fn tokenize(input: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+    let mut chars = input.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            '"' => {
+                in_quotes = !in_quotes;
+            }
+            ' ' | '\t' | '\n' if !in_quotes => {
+                if !current.is_empty() {
+                    tokens.push(current.clone());
+                    current.clear();
+                }
+            }
+            _ => {
+                current.push(ch);
+            }
+        }
+    }
+
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    tokens
 }

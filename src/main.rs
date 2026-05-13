@@ -6,12 +6,12 @@ mod engine;
 pub mod thread_pool;
 mod pubsub;
 
-use std::time::{SystemTime, Duration};
+use std::time::{ SystemTime, Duration };
 use std::fs::File;
-use std::io::{BufRead, BufReader};
-use crate::engine::Entry;
+use std::io::{ BufRead, BufReader };
+use crate::engine::{ DataType, Entry };
 use std::sync::Arc;
-use crate::protocol::{parse_command, Command};
+use crate::protocol::{ parse_command, Command };
 
 #[tokio::main]
 async fn main() {
@@ -24,47 +24,71 @@ async fn main() {
 
         for line in reader.lines() {
             if let Ok(content) = line {
-                let parts: Vec<String> = content.split_whitespace().map(|s| s.to_string()).collect();
+                let parts = crate::protocol::tokenize(&content);
 
                 let command = parse_command(&parts);
 
                 match command {
                     Command::Set(k, v) => {
                         let entry = Entry {
-                            value: v,
-                            expires_at: None
+                            value: DataType::String(v),
+                            expires_at: None,
                         };
                         map.insert(k, entry);
                         count += 1;
-                    },
+                    }
                     Command::Del(k) => {
                         map.remove(&k);
                         count += 1;
                     }
                     Command::Incr(k) => {
                         let current = match map.get(&k) {
-                            Some(entry) => entry.value.parse::<i64>().unwrap_or(0),
+                            Some(entry) => {
+                                match &entry.value {
+                                    DataType::String(val) => val.parse::<i64>().unwrap_or(0),
+                                    _ => 0,
+                                }
+                            }
                             None => 0,
                         };
 
                         let entry = Entry {
-                            value: (current + 1).to_string(),
-                            expires_at: None
+                            value: DataType::String((current + 1).to_string()),
+                            expires_at: None,
                         };
 
                         map.insert(k, entry);
                         count += 1;
                     }
                     Command::SetEx(k, s, v) => {
-                        let expiration_time  = SystemTime::now() + Duration::from_secs(s as u64);
+                        let expiration_time = SystemTime::now() + Duration::from_secs(s as u64);
 
                         let new_entry = Entry {
-                            value: v,
+                            value: DataType::String(v),
                             expires_at: Some(expiration_time),
                         };
 
                         map.insert(k.clone(), new_entry);
                         count += 1;
+                    }
+                    Command::LPush(k, v) => {
+                        let entry = map.entry(k).or_insert_with(|| Entry {
+                            value: DataType::List(std::collections::VecDeque::new()),
+                            expires_at: None,
+                        });
+
+                        if let DataType::List(list) = &mut entry.value {
+                            list.push_front(v);
+                            count += 1;
+                        }
+                    }
+                    Command::LPop(k) => {
+                        if let Some(entry) = map.get_mut(&k) {
+                            if let DataType::List(list) = &mut entry.value {
+                                list.pop_front();
+                                count += 1;
+                            }
+                        }
                     }
                     _ => {}
                 }
@@ -100,8 +124,13 @@ async fn main() {
             if !keys_to_del.is_empty() {
                 use tokio::fs::OpenOptions;
                 use tokio::io::AsyncWriteExt;
-                
-                if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("database.aof").await {
+
+                if
+                    let Ok(mut file) = OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open("database.aof").await
+                {
                     for key in keys_to_del {
                         let log = format!("DEL {}\n", key);
                         let _ = file.write_all(log.as_bytes()).await;
@@ -117,29 +146,75 @@ async fn main() {
             tokio::time::sleep(Duration::from_secs(60)).await;
 
             let mut new_aof_content = String::new();
-
             let map = db_compact.read().await;
+
             for (key, entry) in map.iter() {
-                if let Some(expiration) = entry.expires_at {
-                    if let Ok(duration) = expiration.duration_since(SystemTime::now()) {
-                        let secs = duration.as_secs();
-                        new_aof_content.push_str(&format!("SETEX {} {} {}\n", key, secs, entry.value));
+                match &entry.value {
+                    DataType::String(val) => {
+                        if let Some(expiration) = entry.expires_at {
+                            if let Ok(duration) = expiration.duration_since(SystemTime::now()) {
+                                let secs = duration.as_secs();
+                                new_aof_content.push_str(
+                                    &format!("SET {} {} \"{}\"\n", key, secs, val)
+                                );
+                            }
+                        } else {
+                            new_aof_content.push_str(&format!("SET {} \"{}\"\n", key, val));
+                        }
                     }
-                } else {
-                    new_aof_content.push_str(&format!("SET {} {}\n", key, entry.value));
+
+                    DataType::List(list) => {
+                        for item in list.iter().rev() {
+                            new_aof_content.push_str(&format!("LPUSH {} \"{}\"\n", key, item));
+                        }
+                    }
+
+                    DataType::HashMap(_) => {}
                 }
             }
 
             drop(map);
 
             use tokio::fs;
-            if fs::write("database.temp.aof", new_aof_content).await.is_ok() {
+            if fs::write("database.remp.aof", new_aof_content).await.is_ok() {
                 if fs::rename("database.temp.aof", "database.aof").await.is_ok() {
-                    println!("AOF Compaction complete. Log file optimized.");
+                    println!("AOF Compaction complete. Log file optimized");
                 }
             }
         }
     });
+
+    // let db_compact = Arc::clone(&db);
+    // tokio::spawn(async move {
+    //     loop {
+    //         tokio::time::sleep(Duration::from_secs(60)).await;
+
+    //         let mut new_aof_content = String::new();
+
+    //         let map = db_compact.read().await;
+    //         for (key, entry) in map.iter() {
+    //             if let DataType::String(val) = &entry.value {
+    //                 if let Some(expiration) = entry.expires_at {
+    //                     if let Ok(duration) = expiration.duration_since(SystemTime::now()) {
+    //                         let secs = duration.as_secs();
+    //                         new_aof_content.push_str(&format!("SETEX {} {} {}\n", key, secs, val));
+    //                     }
+    //                 } else {
+    //                     new_aof_content.push_str(&format!("SET {} {}\n", key, val));
+    //                 }
+    //             }
+    //         }
+
+    //         drop(map);
+
+    //         use tokio::fs;
+    //         if fs::write("database.temp.aof", new_aof_content).await.is_ok() {
+    //             if fs::rename("database.temp.aof", "database.aof").await.is_ok() {
+    //                 println!("AOF Compaction complete. Log file optimized.");
+    //             }
+    //         }
+    //     }
+    // });
 
     let address = "127.0.0.1:6379";
     let pubsub = pubsub::new_pubsub();
