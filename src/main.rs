@@ -90,6 +90,16 @@ async fn main() {
                             }
                         }
                     }
+                    Command::HSet(k, f, v) => {
+                        let entry = map.entry(k).or_insert_with(|| Entry {
+                            value: DataType::HashMap(std::collections::HashMap::new()),
+                            expires_at: None,
+                        });
+                        if let DataType::HashMap(hmap) = &mut entry.value {
+                            hmap.insert(f, v);
+                            count += 1;
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -169,7 +179,11 @@ async fn main() {
                         }
                     }
 
-                    DataType::HashMap(_) => {}
+                    DataType::HashMap(hmap) => {
+                        for (field, value) in hmap {
+                            new_aof_content.push_str(&format!("HSET {} {} \"{}\"\n", key, field, value));
+                        }
+                    }
                 }
             }
 

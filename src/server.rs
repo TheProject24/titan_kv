@@ -1,6 +1,7 @@
 // src/server.rs
 
 use crate::pubsub::{ PubSub };
+use std::fmt::format;
 use std::time::Duration;
 use tokio::net::{ TcpListener, TcpStream };
 use tokio::io::{
@@ -154,7 +155,7 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
 
                             let log = format!("DEL {}\n", key);
                             file.write_all(log.as_bytes()).await.unwrap();
-                            let _ = stream.write_all(b"$+1\r\n").await;
+                            let _ = stream.write_all(b"$:1\r\n").await;
                         } else {
                             let _ = stream.write_all(b"$+0\r\n").await;
                         }
@@ -165,7 +166,7 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                         let key_exists = map.contains_key(&key);
 
                         if key_exists {
-                            let _ = stream.write_all(b"$+1\r\n").await;
+                            let _ = stream.write_all(b"$:1\r\n").await;
                         } else {
                             let _ = stream.write_all(b"$+0\r\n").await;
                         }
@@ -203,7 +204,7 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                         };
                         let new_num = current_number + 1;
                         let new_entry = Entry {
-                            value: crate::DataType::String(new_num.to_string()),
+                            value: crate::engine::DataType::String(new_num.to_string()),
                             expires_at: None,
                         };
                         map.insert(key.clone(), new_entry);
@@ -309,14 +310,37 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                             let _ = stream.write_all(b"$-1\r\n").await;
                         }
                     }
-                    Command::HSet(key, field, value) => {
+                    Command::RPush(key, value) => {
                         let mut map = db.write().await;
                         let entry = map.entry(key.clone()).or_insert_with(|| Entry {
-                            value: crate::DataType::HashMap(std::collections::HashMap::new()),
+                            value: crate::engine::DataType::List(std::collections::VecDeque::new()),
                             expires_at: None,
                         });
 
-                        if let crate::DataType::HashMap(hmap) = &mut entry.value {
+                        if let crate::engine::DataType::List(list) = &mut entry.value {
+                            list.push_back(value.clone());
+                            let len = list.len();
+
+                            let mut file = OpenOptions::new()
+                                .create(true)
+                                .append(true)
+                                .open("database.aof").await
+                                .unwrap();
+
+                            let log = format!("RPUSH {} \"{}\"\n", key, value);
+                            file.write_all(log.as_bytes()).await.unwrap();
+
+                            let response = format!(":{}\r\n", len);
+                            let _ = stream.write_all(response.as_bytes()).await;
+                        }
+                    }
+                    Command::HSet(key, field, value) => {
+                        let mut map = db.write().await;
+                        let entry = map.entry(key.clone()).or_insert_with(|| Entry {
+                            value: crate::engine::DataType::HashMap(std::collections::HashMap::new()),
+                            expires_at: None,
+                        });
+                        if let crate::engine::DataType::HashMap(hmap) = &mut entry.value {
                             hmap.insert(field.clone(), value.clone());
                             let mut file = OpenOptions::new()
                                 .create(true)
@@ -330,6 +354,42 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                             let _ = stream.write_all(response.as_bytes()).await;
                         } else {
                             let _ = stream.write_all(b"-WRONGTYPE\r\n").await;
+                        }
+                    }
+                    Command::HGetAll(key) => {
+                        let map = db.read().await;
+                        if let Some(entry) = map.get(&key) {
+                            if let crate::engine::DataType::HashMap(hmap) = &entry.value {
+                                let mut response = String::new();
+                                for (f, v) in hmap {
+                                    response.push_str(&format!("{}: {}\n", f, v));
+                                }
+                                let _ = stream.write_all(response.as_bytes()).await;
+                            } else {
+                                let _ = stream.write_all(b"-WRONGTYPE\r\n").await;
+                            }
+                        } else {
+                            let _ = stream.write_all(b"(empty array)\r\n").await;
+                        }
+                    }
+                    Command::HGet(key, field) => {
+                        let map = db.read().await;
+                        if let Some(entry) = map.get(&key) {
+                            if let crate::engine::DataType::HashMap(hmap) = &entry.value {
+                                match hmap.get(&field) {
+                                    Some(val) => {
+                                        let response = format!("+{}\r\n", val);
+                                        let _ = stream.write_all(response.as_bytes()).await;
+                                    }
+                                    None => {
+                                        let _ = stream.write_all(b"$-1\r\n").await;
+                                    }
+                                }
+                            } else {
+                                let _ = stream.write_all(b"-WRONGTYPE\r\n").await;
+                            }
+                        } else {
+                            let _ = stream.write_all(b"$-1\r\n").await;
                         }
                     }
                     Command::Unknown => {

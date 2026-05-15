@@ -1,5 +1,7 @@
 // src/protocol.rs
 
+use tokio::io::AsyncReadExt;
+
 #[derive(Debug)]
 pub enum Command {
     Ping,
@@ -14,8 +16,10 @@ pub enum Command {
     Unsubscribe(String),
     LPush(String, String),
     LPop(String),
+    RPush(String, String),
     HSet(String, String, String),
-    // HGet(String, String),
+    HGetAll(String),
+    HGet(String, String),
     Unknown,
 }
 
@@ -42,9 +46,11 @@ pub fn parse_command(parts: &[String]) -> Command {
         "UNSUBSCRIBE" if parts.len() == 2 => Command::Unsubscribe(parts[1].clone()),
         "LPUSH" if parts.len() == 3 => Command::LPush(parts[1].clone(), parts[2].clone()),
         "LPOP" if parts.len() == 2 => Command::LPop(parts[1].clone()),
+        "RPUSH" if parts.len() == 3 => Command::RPush(parts[1].clone(), parts[2].clone()),
         "HSET" if parts.len() == 4 =>
             Command::HSet(parts[1].clone(), parts[2].clone(), parts[3].clone()),
-        // "HGET" if parts.len() == 3 => Command::HGet(parts[1].clone(), parts[2].clone()),
+        "HGETALL" if parts.len() == 2 => Command::HGetAll(parts[1].clone()),
+        "HGET" if parts.len() == 3 => Command::HGet(parts[1].clone(), parts[2].clone()),
         _ => Command::Unknown,
     }
 }
@@ -76,4 +82,34 @@ pub fn tokenize(input: &str) -> Vec<String> {
         tokens.push(current);
     }
     tokens
+}
+
+pub async fn read_resp<R: tokio::io::AsyncBufReadExt + Unpin>(
+    reader: &mut R,
+) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    let mut line = String::new();
+    reader.read_line(&mut line).await?;
+
+    if !line.starts_with('*'){
+        return Ok(crate::protocol::tokenize(&line));
+    }
+
+    let count = line.trim_start_matches('*').trim().parse::<usize>()?;
+    let mut args = Vec::with_capacity(count);
+
+    for _ in 0..count {
+        let mut len_line = String::new();
+        reader.read_line(&mut len_line).await?;
+
+        if !len_line.starts_with('$') { continue; }
+        let len = len_line.trim_start_matches('$').trim().parse::<usize>()?;
+
+        let mut buf = vec![0u8; len + 2];
+        reader.read_exact(&mut buf).await?;
+
+        let arg = String::from_utf8_lossy(&buf[..len]).to_string();
+        args.push(arg);
+    }
+
+    Ok(args)
 }
