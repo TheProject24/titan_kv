@@ -1,13 +1,13 @@
 // src/server.rs
 
 use crate::pubsub::{ PubSub };
-use std::fmt::format;
+// use std::fmt::format;
 use std::time::Duration;
 use tokio::net::{ TcpListener, TcpStream };
 use tokio::io::{
     // AsyncReadExt,
     AsyncWriteExt,
-    AsyncBufReadExt,
+    // AsyncBufReadExt,
     BufReader,
 };
 use tokio::fs::OpenOptions;
@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use crate::engine::{ Db, Entry };
-use crate::protocol::{ parse_command, Command };
+use crate::protocol::{ parse_command, Command, read_resp };
 // use crate::thread_pool::ThreadPool;
 
 async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
@@ -24,8 +24,8 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
 
     loop {
         // NEW: Uses our dedicated RESP reader
-        let parts = match read_command(&mut reader).await {
-            Some(p) if !p.is_empty() => p,
+        let parts: Vec<String> = match read_resp(&mut reader).await {
+            Ok(p) if !p.is_empty() => p,
             _ => { println!("Client Disconnected."); break; }
         };
 
