@@ -1,6 +1,11 @@
-SET money 5
 SET moolah doggy
-SET lives 7
+SET key:__rand_int__ VXK
 SET dragovic 99
-SETEX bomb 15 tick_tock
-DEL bomb
+SET money 5
+SET lives 7
+LPUSH tasks Refactor Engine
+LPUSH tasks Fix Parser
+LPUSH tasks "Refactor engine"
+LPUSH tasks "Fix parser"
+LPOP tasks
+LPOP tasks

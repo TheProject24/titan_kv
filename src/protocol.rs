@@ -1,5 +1,7 @@
 // src/protocol.rs
 
+use tokio::io::AsyncReadExt;
+
 #[derive(Debug)]
 pub enum Command {
     Ping,
@@ -9,61 +11,105 @@ pub enum Command {
     Exists(String),
     Incr(String),
     SetEx(String, i64, String),
-    Unknown
+    Publish(String, String),
+    Subscribe(String),
+    Unsubscribe(String),
+    LPush(String, String),
+    LPop(String),
+    RPush(String, String),
+    HSet(String, String, String),
+    HGetAll(String),
+    HGet(String, String),
+    Unknown,
 }
 
-pub fn parse_command(input: &str) -> Command {
-    let clean_input = input.trim();
-
-    let parts: Vec<&str> = clean_input.split_whitespace().collect();
+pub fn parse_command(parts: &[String]) -> Command {
+    if parts.is_empty() {
+        return Command::Unknown;
+    }
 
     match parts[0].to_uppercase().as_str() {
         "PING" => Command::Ping,
-        "GET" => {
-            if parts.len() == 2 {
-                Command::Get(parts[1].to_string())
-            } else {
-                Command::Unknown
+        "GET" if parts.len() == 2 => Command::Get(parts[1].clone()),
+        "SET" if parts.len() == 3 => Command::Set(parts[1].clone(), parts[2].clone()),
+        "DEL" if parts.len() == 2 => Command::Del(parts[1].clone()),
+        "EXISTS" if parts.len() == 2 => Command::Exists(parts[1].clone()),
+        "INCR" if parts.len() == 2 => Command::Incr(parts[1].clone()),
+        "SETEX" if parts.len() == 4 => {
+            match parts[2].parse::<i64>() {
+                Ok(seconds) => Command::SetEx(parts[1].clone(), seconds, parts[3].clone()),
+                Err(_) => Command::Unknown,
             }
         }
-        "SET" => {
-            if parts.len() == 3 {
-                Command::Set(parts[1].to_string(), parts[2].to_string())
-            } else {
-                Command::Unknown
-            }
-        }
-        "DEL" => {
-            if parts.len() == 2 {
-                Command::Del(parts[1].to_string())
-            } else {
-                Command::Unknown
-            }
-        }
-        "EXISTS" => {
-            if parts.len() == 2 {
-                Command::Exists(parts[1].to_string())
-            } else {
-                Command::Unknown
-            }
-        }
-        "INCR" => {
-            if parts.len() == 2 {
-                Command::Incr(parts[1].to_string())
-            } else {
-                Command::Unknown
-            }
-        }
-        "SETEX" => {
-            if parts.len() == 4 {
-                match parts[2].parse::<i64>() {
-                    Ok(seconds) => Command::SetEx(parts[1].to_string(), seconds, parts[3].to_string()),
-                    Err(_) => Command::Unknown,
-                }
-            } else {
-                Command::Unknown
-            }
-        }
-        _ => Command::Unknown
+        "PUBLISH" if parts.len() == 3 => Command::Publish(parts[1].clone(), parts[2].clone()),
+        "SUBSCRIBE" if parts.len() == 2 => Command::Subscribe(parts[1].clone()),
+        "UNSUBSCRIBE" if parts.len() == 2 => Command::Unsubscribe(parts[1].clone()),
+        "LPUSH" if parts.len() == 3 => Command::LPush(parts[1].clone(), parts[2].clone()),
+        "LPOP" if parts.len() == 2 => Command::LPop(parts[1].clone()),
+        "RPUSH" if parts.len() == 3 => Command::RPush(parts[1].clone(), parts[2].clone()),
+        "HSET" if parts.len() == 4 =>
+            Command::HSet(parts[1].clone(), parts[2].clone(), parts[3].clone()),
+        "HGETALL" if parts.len() == 2 => Command::HGetAll(parts[1].clone()),
+        "HGET" if parts.len() == 3 => Command::HGet(parts[1].clone(), parts[2].clone()),
+        _ => Command::Unknown,
     }
+}
+
+pub fn tokenize(input: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+    let mut chars = input.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            '"' => {
+                in_quotes = !in_quotes;
+            }
+            ' ' | '\t' | '\n' if !in_quotes => {
+                if !current.is_empty() {
+                    tokens.push(current.clone());
+                    current.clear();
+                }
+            }
+            _ => {
+                current.push(ch);
+            }
+        }
+    }
+
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    tokens
+}
+
+pub async fn read_resp<R: tokio::io::AsyncBufReadExt + Unpin>(
+    reader: &mut R,
+) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    let mut line = String::new();
+    reader.read_line(&mut line).await?;
+
+    if !line.starts_with('*'){
+        return Ok(crate::protocol::tokenize(&line));
+    }
+
+    let count = line.trim_start_matches('*').trim().parse::<usize>()?;
+    let mut args = Vec::with_capacity(count);
+
+    for _ in 0..count {
+        let mut len_line = String::new();
+        reader.read_line(&mut len_line).await?;
+
+        if !len_line.starts_with('$') { continue; }
+        let len = len_line.trim_start_matches('$').trim().parse::<usize>()?;
+
+        let mut buf = vec![0u8; len + 2];
+        reader.read_exact(&mut buf).await?;
+
+        let arg = String::from_utf8_lossy(&buf[..len]).to_string();
+        args.push(arg);
+    }
+
+    Ok(args)
 }
