@@ -23,42 +23,16 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
     let mut reader = BufReader::new(read_half);
 
     loop {
-        let mut line = String::new();
+        // NEW: Uses our dedicated RESP reader
+        let parts = match read_command(&mut reader).await {
+            Some(p) if !p.is_empty() => p,
+            _ => { println!("Client Disconnected."); break; }
+        };
 
-        match reader.read_line(&mut line).await {
-            Ok(0) => {
-                println!("Client Disconnected.");
-                break;
-            }
-            Ok(_) => {
-                let mut parts = Vec::new();
+        let command = parse_command(&parts);
 
-                if line.starts_with('*') {
-                    if let Ok(num_args) = line[1..].trim().parse::<usize>() {
-                        for _ in 0..num_args {
-                            let mut len_line = String::new();
-                            let _ = reader.read_line(&mut len_line).await;
-
-                            let mut arg_line = String::new();
-                            let _ = reader.read_line(&mut arg_line).await;
-
-                            parts.push(
-                                arg_line.trim_end_matches("\r\n").trim_end_matches("\n").to_string()
-                            );
-                        }
-                    }
-                } else {
-                    parts = crate::protocol::tokenize(&line);
-                }
-
-                if parts.is_empty() {
-                    continue;
-                }
-
-                let command = parse_command(&parts);
-
-                match command {
-                    Command::SetEx(key, seconds, value) => {
+        match command {
+            Command::SetEx(key, seconds, value) => {
                         let expiration_time =
                             SystemTime::now() + Duration::from_secs(seconds as u64);
 
@@ -80,10 +54,10 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                         file.write_all(log.as_bytes()).await.unwrap();
                         let _ = stream.write_all(b"+OK\r\n").await;
                     }
-                    Command::Ping => {
+            Command::Ping => {
                         let _ = stream.write_all(b"+PONG\r\n").await;
                     }
-                    Command::Set(key, value) => {
+            Command::Set(key, value) => {
                         let mut map = db.write().await;
                         let new_entry = Entry {
                             value: crate::engine::DataType::String(value.clone()),
@@ -102,7 +76,7 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
 
                         let _ = stream.write_all(b"+OK\r\n").await;
                     }
-                    Command::Get(key) => {
+            Command::Get(key) => {
                         let mut map = db.write().await;
 
                         match map.get(&key) {
@@ -142,7 +116,7 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                             }
                         }
                     }
-                    Command::Del(key) => {
+            Command::Del(key) => {
                         let mut map = db.write().await;
                         let not_there = map.remove(&key).is_some();
 
@@ -160,7 +134,7 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                             let _ = stream.write_all(b"$+0\r\n").await;
                         }
                     }
-                    Command::Exists(key) => {
+            Command::Exists(key) => {
                         let map = db.read().await;
 
                         let key_exists = map.contains_key(&key);
@@ -171,7 +145,7 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                             let _ = stream.write_all(b"$+0\r\n").await;
                         }
                     }
-                    Command::Incr(key) => {
+            Command::Incr(key) => {
                         let mut map = db.write().await;
                         let current_number = match map.get(&key) {
                             Some(entry) => {
@@ -221,7 +195,7 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                         let response = format!("+{}\r\n", new_num);
                         let _ = stream.write_all(response.as_bytes()).await;
                     }
-                    Command::Publish(channel, message) => {
+            Command::Publish(channel, message) => {
                         crate::pubsub::handle_publish(
                             &pubsub,
                             &channel,
@@ -229,7 +203,7 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                             &mut stream
                         ).await;
                     }
-                    Command::Subscribe(channel) => {
+            Command::Subscribe(channel) => {
                         crate::pubsub::handle_subscribe(
                             &pubsub,
                             &channel,
@@ -238,7 +212,7 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                         ).await;
                         break;
                     }
-                    Command::Unsubscribe(channel) => {
+            Command::Unsubscribe(channel) => {
                         let ack = format!(
                             "*3\r\n$11\r\nunsubscribe\r\n${}\r\n{}\r\n:0\r\n",
                             channel.len(),
@@ -246,7 +220,7 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                         );
                         let _ = stream.write_all(ack.as_bytes()).await;
                     }
-                    Command::LPush(key, value) => {
+            Command::LPush(key, value) => {
                         let mut map = db.write().await;
 
                         let entry = map.entry(key.clone()).or_insert_with(|| Entry {
@@ -278,7 +252,7 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                             }
                         }
                     }
-                    Command::LPop(key) => {
+            Command::LPop(key) => {
                         let mut map = db.write().await;
 
                         if let Some(entry) = map.get_mut(&key) {
@@ -310,7 +284,7 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                             let _ = stream.write_all(b"$-1\r\n").await;
                         }
                     }
-                    Command::RPush(key, value) => {
+            Command::RPush(key, value) => {
                         let mut map = db.write().await;
                         let entry = map.entry(key.clone()).or_insert_with(|| Entry {
                             value: crate::engine::DataType::List(std::collections::VecDeque::new()),
@@ -334,7 +308,7 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                             let _ = stream.write_all(response.as_bytes()).await;
                         }
                     }
-                    Command::HSet(key, field, value) => {
+            Command::HSet(key, field, value) => {
                         let mut map = db.write().await;
                         let entry = map.entry(key.clone()).or_insert_with(|| Entry {
                             value: crate::engine::DataType::HashMap(std::collections::HashMap::new()),
@@ -356,7 +330,7 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                             let _ = stream.write_all(b"-WRONGTYPE\r\n").await;
                         }
                     }
-                    Command::HGetAll(key) => {
+            Command::HGetAll(key) => {
                         let map = db.read().await;
                         if let Some(entry) = map.get(&key) {
                             if let crate::engine::DataType::HashMap(hmap) = &entry.value {
@@ -372,7 +346,7 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                             let _ = stream.write_all(b"(empty array)\r\n").await;
                         }
                     }
-                    Command::HGet(key, field) => {
+            Command::HGet(key, field) => {
                         let map = db.read().await;
                         if let Some(entry) = map.get(&key) {
                             if let crate::engine::DataType::HashMap(hmap) = &entry.value {
@@ -392,18 +366,12 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                             let _ = stream.write_all(b"$-1\r\n").await;
                         }
                     }
-                    Command::Unknown => {
+            Command::Unknown => {
                         if let Err(e) = stream.write_all(b"-ERR unknown command\r\n").await {
                             eprintln!("Failed to write to client: {}", e);
                             break;
                         }
                     }
-                }
-            }
-            Err(e) => {
-                eprintln!("Error reading from stream: {}", e);
-                break;
-            }
         }
     }
 }
