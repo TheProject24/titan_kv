@@ -3,6 +3,7 @@
 mod server;
 mod protocol;
 mod engine;
+pub mod logger;
 pub mod thread_pool;
 mod pubsub;
 
@@ -104,7 +105,7 @@ async fn main() {
                 }
             }
         }
-        println!("AOF Replay Complete: Restored {} keys to memory.", count);
+        log_success!("AOF", "AOF Replay Complete: Restored {} keys to memory.", count);
     }
 
     let db_sweeper = Arc::clone(&db);
@@ -126,7 +127,7 @@ async fn main() {
 
             for key in &keys_to_del {
                 map.remove(key);
-                println!("Active Expiration Swept key: {}", key);
+                log_debug!("Sweeper", "Active Expiration Swept key: {}", key);
             }
 
             drop(map);
@@ -190,9 +191,9 @@ async fn main() {
             drop(map);
 
             use tokio::fs;
-            if fs::write("database.remp.aof", new_aof_content).await.is_ok() {
+            if fs::write("database.temp.aof", new_aof_content).await.is_ok() {
                 if fs::rename("database.temp.aof", "database.aof").await.is_ok() {
-                    println!("AOF Compaction complete. Log file optimized");
+                    log_success!("AOF", "AOF Compaction complete. Log file optimized.");
                 }
             }
         }

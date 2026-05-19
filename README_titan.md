@@ -42,19 +42,19 @@ The goal is not to beat Redis. The goal is to understand what it takes to build 
 ┌─────────────────────────────────────────────────────────────┐
 │                     server.rs                               │
 │   TcpListener → tokio::spawn per connection                 │
-│   BufReader with 1024-byte payload guard                    │
-│   Async read_line → parse_command() → dispatch              │
+│   BufReader and tokio async Read/Write usage                │
+│   read_resp() → parse_command() → dispatch                  │
 └───────────┬─────────────────────────────────┬───────────────┘
             │                                 │
             ▼                                 ▼
 ┌───────────────────────┐       ┌─────────────────────────────┐
 │     protocol.rs       │       │         engine.rs           │
 │                       │       │                             │
-│  parse_command(&str)  │       │  Arc<RwLock<HashMap         │
+│  parse_command([Str]) │       │  Arc<RwLock<HashMap         │
 │                       │       │    <String, Entry>>>        │
-│  SET / GET / DEL      │       │                             │
-│  EXISTS / INCR        │       │  Entry {                    │
-│  SETEX / PING         │       │    value: String,           │
+│  SET / LISTS / HASH   │       │                             │
+│  PUBSUB / PING        │       │  Entry {                    │
+│  read_resp(reader)    │       │    value: DataType,         │
 │                       │       │    expires_at: Option       │
 └───────────────────────┘       │      <SystemTime>           │
                                 │  }                          │
@@ -84,15 +84,23 @@ The goal is not to beat Redis. The goal is to understand what it takes to build 
 
 The database is a single type: `Arc<RwLock<HashMap<String, Entry>>>`. `Arc` enables safe shared ownership across async tasks and connection handlers. `RwLock` (from Tokio) allows unlimited concurrent readers while serializing writes — because most workloads read far more than they write.
 
-Each `Entry` carries a `value: String` and an `expires_at: Option<SystemTime>`. Expiration is a first-class citizen in the data model, not a bolted-on afterthought.
+Each `Entry` carries a `value: DataType` (which models natively supported types like `String`, `List`, and `HashMap`) and an `expires_at: Option<SystemTime>`. Expiration is a first-class citizen in the data model, not a bolted-on afterthought.
 
 ### `server.rs` — The Listener
 
-A Tokio `TcpListener` accepts connections in a tight loop. Each accepted connection is handed off to `tokio::spawn`, giving every client its own lightweight async task. The connection handler wraps the socket in a `BufReader` with a hard 1024-byte `take` guard — any oversized payload is rejected and the connection is dropped, preventing buffer-bloat attacks.
+A Tokio `TcpListener` accepts connections in a tight loop. Each accepted connection is handed off to `tokio::spawn`, giving every client its own lightweight async task. The handler manages RESP input, executes the commands on the global memory state, and serializes responses.
 
 ### `protocol.rs` — The Parser
 
-A minimal, allocation-efficient command parser. Splits on whitespace, pattern-matches the uppercase verb, and returns a typed `Command` enum. Unknown or malformed commands return `Command::Unknown` — the server responds with a Redis-compatible `-ERR` and continues rather than panicking.
+A complete RESP-compatible command reader and parser. It tokenizes the incoming binary stream, supports arrays and bulk strings, and returns a strongly-typed `Command` enum encompassing scalar types, lists, hashes, and pubsub operations.
+
+### `pubsub.rs` — Event Broker
+
+Adds real-time publish/subscribe functionality using a separate collection of Tokio broadcast channels. Clients who `SUBSCRIBE` pause typical command parsing to await asynchronous broadcast wakeups whenever another connection pushes a `PUBLISH` event on the channel.
+
+### `logger.rs` — The Monitoring System
+
+A custom macro-driven logging module utilizing `chrono` and `colored`. It replaces generic print statements with vivid, timestamped, and dynamically color-coded terminal outputs (`[INFO]`, `[ERR!]`, `[DBUG]`), ensuring precise tracking of connections, swept keys, incoming RESP traffic, and AOF state.
 
 ### `main.rs` — The Orchestrator
 
@@ -110,15 +118,28 @@ Before Tokio took over async dispatch, Titan KV shipped a fully hand-rolled OS t
 
 ## Commands
 
-| Command  | Syntax                    | Response               | Notes                                           |
-| -------- | ------------------------- | ---------------------- | ----------------------------------------------- |
-| `PING`   | `PING`                    | `+PONG`                | Connection health check                         |
-| `SET`    | `SET key value`           | `+OK`                  | Write to memory + AOF                           |
-| `GET`    | `GET key`                 | `+value` or `$-1`      | Lazy expiry check on read                       |
-| `DEL`    | `DEL key`                 | `+1` or `+0`           | Removes key + AOF entry                         |
-| `EXISTS` | `EXISTS key`              | `+1` or `+0`           | Read-only, uses RwLock read guard               |
-| `INCR`   | `INCR key`                | `+new_value` or `-ERR` | Atomic integer increment; errors on non-integer |
-| `SETEX`  | `SETEX key seconds value` | `+OK`                  | Write with TTL; expiry stored as `SystemTime`   |
+| Command       | Syntax                    | Response                   | Notes                                           |
+| ------------- | ------------------------- | -------------------------- | ----------------------------------------------- |
+| **Keys**      |                           |                            |                                                 |
+| `PING`        | `PING`                    | `+PONG`                    | Connection health check                         |
+| `SET`         | `SET key value`           | `+OK`                      | Write to memory + AOF                           |
+| `GET`         | `GET key`                 | `$<len>\r\n<val>` or `$-1` | Lazy expiry check on read                       |
+| `DEL`         | `DEL key`                 | `:1` or `:0`               | Removes key + AOF entry                         |
+| `EXISTS`      | `EXISTS key`              | `:1` or `:0`               | Read-only, uses RwLock read guard               |
+| `INCR`        | `INCR key`                | `:<new_value>` or `-ERR`   | Atomic integer increment; errors on non-integer |
+| `SETEX`       | `SETEX key seconds value` | `+OK`                      | Write with TTL; expiry stored as `SystemTime`   |
+| **Lists**     |                           |                            |                                                 |
+| `LPUSH`       | `LPUSH key value`         | `:<length>`                | Push an element to the head of a list           |
+| `RPUSH`       | `RPUSH key value`         | `:<length>`                | Push an element to the tail of a list           |
+| `LPOP`        | `LPOP key`                | `$<len>\r\n<val>`          | Pop an element from the head of a list          |
+| **Hashes**    |                           |                            |                                                 |
+| `HSET`        | `HSET key fld val`        | `+OK`                      | Add or update a field in a hash map             |
+| `HGET`        | `HGET key field`          | `$<len>\r\n<val>` or `$-1` | Get the value of a field in a hash map          |
+| `HGETALL`     | `HGETALL key`             | `*<count>\r\n...`          | Retrieve all fields and values from a hash map  |
+| **PubSub**    |                           |                            |                                                 |
+| `PUBLISH`     | `PUBLISH channel msg`     | `:<receivers>`             | Push a message into the event bus               |
+| `SUBSCRIBE`   | `SUBSCRIBE channel`       | `*3\r\n...`                | Listen for broadcasts indefinitely              |
+| `UNSUBSCRIBE` | `UNSUBSCRIBE ch`          | `*3\r\n...`                | End a subscription                              |
 
 ---
 
@@ -202,7 +223,7 @@ echo -e "SET name Titan\n" | nc 127.0.0.1 6379
 # → +OK
 
 echo -e "GET name\n" | nc 127.0.0.1 6379
-# → +Titan
+# → $5\r\nTitan\r\n
 ```
 
 ---
@@ -250,27 +271,14 @@ redis-benchmark -p 6379 -n 100000 -c 50 -t set,get
 
 ---
 
-### Complex Data Structures
+### Advanced Data Structures & Capabilities
 
-> _Strings are just the beginning._
+> _Strings, Lists, Hashmaps, and beyond._
 
-Redis's real power comes from its native data structures. The plan is to extend the engine to support:
+With core scalar data, `VecDeque`-backed lists, and nested `HashMap` instances already implemented, the engine's Enum model could further encompass:
 
-- **Lists** — `LPUSH`, `RPUSH`, `LPOP`, `RPOP`, `LRANGE` backed by a `VecDeque<String>`
-- **Hash Maps** — `HSET`, `HGET`, `HDEL`, `HGETALL` backed by a nested `HashMap<String, String>`
 - **Sets** — `SADD`, `SREM`, `SMEMBERS`, `SISMEMBER` backed by a `HashSet<String>`
-
-This requires evolving the `Entry` type from a simple `String` to a proper `Value` enum — the first major architectural refactor.
-
----
-
-### Pub/Sub Messaging
-
-> _From a store to a message broker._
-
-Adding `SUBSCRIBE` and `PUBLISH` transforms Titan KV into a real-time event bus. A client subscribing to a channel blocks until a message is published. This requires a new concurrency primitive: a map of `channel → Vec<Sender<String>>` using Tokio broadcast channels, and a completely separate command path from the key-value engine.
-
-Use cases: live notifications, chat room backends, event streams between microservices.
+- **Sorted Sets** — `ZADD`, `ZRANGE`, `ZSCORE` to support complex leaderboard-like operations.
 
 ---
 
@@ -296,8 +304,10 @@ titan_kv/
 ├── src/
 │   ├── main.rs          # Startup: AOF replay, background tasks, server launch
 │   ├── server.rs        # TCP listener, per-connection async handler
-│   ├── protocol.rs      # Command parser → typed Command enum
+│   ├── protocol.rs      # RESP parser → typed Command enum
 │   ├── engine.rs        # Core DB type: Arc<RwLock<HashMap<String, Entry>>>
+│   ├── logger.rs        # Advanced color-coded terminal monitoring macros
+│   ├── pubsub.rs        # Broadcast broker logic managing subscription channels
 │   └── thread_pool.rs   # Hand-rolled OS thread pool (graceful shutdown)
 ├── database.aof         # Append-only log (created on first write)
 └── Cargo.toml
