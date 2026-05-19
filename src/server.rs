@@ -30,7 +30,14 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
         };
 
         let command = parse_command(&parts);
-        crate::log_info!("Command", "{}", parts.join(" "));
+        let summary_parts: Vec<String> = parts.iter().map(|p| {
+            if p.len() > 30 {
+                format!("{}...({}b)", &p[..15], p.len())
+            } else {
+                p.clone()
+            }
+        }).collect();
+        crate::log_info!("Command", "{}", summary_parts.join(" "));
 
         match command {
             Command::SetEx(key, seconds, value) => {
