@@ -14,6 +14,18 @@ use tokio::fs::OpenOptions;
 use std::sync::Arc;
 use std::time::SystemTime;
 
+async fn append_aof(log: String) {
+    if let Ok(mut file) = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("database.aof").await
+    {
+        let _ = file.write_all(log.as_bytes()).await;
+    } else {
+        crate::log_error!("AOF", "Failed to append to AOF file (Access Denied/Locked)");
+    }
+}
+
 use crate::engine::{ Db, Entry };
 use crate::protocol::{ parse_command, Command, read_resp };
 // use crate::thread_pool::ThreadPool;
@@ -52,14 +64,8 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                         let mut map = db.write().await;
                         map.insert(key.clone(), new_entry);
 
-                        let mut file = OpenOptions::new()
-                            .create(true)
-                            .append(true)
-                            .open("database.aof").await
-                            .unwrap();
-
                         let log = format!("SETEX {} {} {}\n", key, seconds, value);
-                        file.write_all(log.as_bytes()).await.unwrap();
+                        append_aof(log).await;
                         let _ = stream.write_all(b"+OK\r\n").await;
                     }
             Command::Ping => {
@@ -73,14 +79,8 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                         };
                         map.insert(key.clone(), new_entry);
 
-                        let mut file = OpenOptions::new()
-                            .create(true)
-                            .append(true)
-                            .open("database.aof").await
-                            .unwrap();
-
                         let log = format!("SET {} {}\n", key, value);
-                        file.write_all(log.as_bytes()).await.unwrap();
+                        append_aof(log).await;
 
                         let _ = stream.write_all(b"+OK\r\n").await;
                     }
@@ -92,14 +92,8 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                                 if let Some(expiration) = entry.expires_at {
                                     if SystemTime::now() > expiration {
                                         if map.remove(&key).is_some() {
-                                            let mut file = OpenOptions::new()
-                                                .create(true)
-                                                .append(true)
-                                                .open("database.aof").await
-                                                .unwrap();
-
                                             let log = format!("DEL {}\n", key);
-                                            file.write_all(log.as_bytes()).await.unwrap();
+                                            append_aof(log).await;
 
                                             let _ = stream.write_all(b"$-1\r\n").await;
                                         }
@@ -129,14 +123,8 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                         let not_there = map.remove(&key).is_some();
 
                         if not_there {
-                            let mut file = OpenOptions::new()
-                                .create(true)
-                                .append(true)
-                                .open("database.aof").await
-                                .unwrap();
-
                             let log = format!("DEL {}\n", key);
-                            file.write_all(log.as_bytes()).await.unwrap();
+                            append_aof(log).await;
                             let _ = stream.write_all(b":1\r\n").await;
                         } else {
                             let _ = stream.write_all(b":0\r\n").await;
@@ -191,14 +179,8 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                         };
                         map.insert(key.clone(), new_entry);
 
-                        let mut file = OpenOptions::new()
-                            .create(true)
-                            .append(true)
-                            .open("database.aof").await
-                            .unwrap();
-
                         let log = format!("INCR {}\n", key);
-                        file.write_all(log.as_bytes()).await.unwrap();
+                        append_aof(log).await;
 
                         let response = format!(":{}\r\n", new_num);
                         let _ = stream.write_all(response.as_bytes()).await;
@@ -241,14 +223,8 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                                 list.push_front(value.clone());
                                 let len = list.len();
 
-                                let mut file = OpenOptions::new()
-                                    .create(true)
-                                    .append(true)
-                                    .open("database.aof").await
-                                    .unwrap();
-
                                 let log = format!("LPUSH {} \"{}\"\n", key, value);
-                                file.write_all(log.as_bytes()).await.unwrap();
+                                append_aof(log).await;
 
                                 let response = format!(":{}\r\n", len);
                                 let _ = stream.write_all(response.as_bytes()).await;
@@ -267,14 +243,8 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                             match &mut entry.value {
                                 crate::engine::DataType::List(list) => {
                                     if let Some(val) = list.pop_front() {
-                                        let mut file = OpenOptions::new()
-                                            .create(true)
-                                            .append(true)
-                                            .open("database.aof").await
-                                            .unwrap();
-
                                         let log = format!("LPOP {}\n", key);
-                                        file.write_all(log.as_bytes()).await.unwrap();
+                                        append_aof(log).await;
 
                                         let response = format!("${}\r\n{}\r\n", val.len(), val);
                                         let _ = stream.write_all(response.as_bytes()).await;
@@ -303,14 +273,8 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                             list.push_back(value.clone());
                             let len = list.len();
 
-                            let mut file = OpenOptions::new()
-                                .create(true)
-                                .append(true)
-                                .open("database.aof").await
-                                .unwrap();
-
                             let log = format!("RPUSH {} \"{}\"\n", key, value);
-                            file.write_all(log.as_bytes()).await.unwrap();
+                            append_aof(log).await;
 
                             let response = format!(":{}\r\n", len);
                             let _ = stream.write_all(response.as_bytes()).await;
@@ -324,13 +288,8 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                         });
                         if let crate::engine::DataType::HashMap(hmap) = &mut entry.value {
                             hmap.insert(field.clone(), value.clone());
-                            let mut file = OpenOptions::new()
-                                .create(true)
-                                .append(true)
-                                .open("database.aof").await
-                                .unwrap();
                             let log = format!("HSET {} {} \"{}\"\n", key, field, value);
-                            file.write_all(log.as_bytes()).await.unwrap();
+                            append_aof(log).await;
 
                             let response = format!("+OK\r\n");
                             let _ = stream.write_all(response.as_bytes()).await;

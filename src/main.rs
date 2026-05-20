@@ -16,6 +16,9 @@ use crate::protocol::{ parse_command, Command };
 
 #[tokio::main]
 async fn main() {
+    #[cfg(windows)]
+    let _ = colored::control::set_virtual_terminal(true);
+
     let db = engine::new_db();
 
     if let Ok(file) = File::open("database.aof") {
