@@ -262,6 +262,112 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                             let _ = stream.write_all(b"$-1\r\n").await;
                         }
                     }
+            Command::RPop(key) => {
+                        let mut map = db.write().await;
+
+                        if let Some(entry) = map.get_mut(&key) {
+                            match &mut entry.value {
+                                crate::engine::DataType::List(list) => {
+                                    if let Some(val) = list.pop_back() {
+                                        let log = format!("RPOP {}\n", key);
+                                        append_aof(log).await;
+
+                                        let response = format!("${}\r\n{}\r\n", val.len(), val);
+                                        let _ = stream.write_all(response.as_bytes()).await;
+                                    } else {
+                                        let _ = stream.write_all(b"$-1\r\n").await;
+                                    }
+                                }
+                                _ => {
+                                    let _ = stream.write_all(
+                                        b"-WRONGTYPE Operation against a key holding the wrong kind of value\r\n"
+                                    ).await;
+                                }
+                            }
+                        } else {
+                            let _ = stream.write_all(b"$-1\r\n").await;
+                        }
+                    }
+            Command::LTrim(key, start, stop) => {
+                        let mut map = db.write().await;
+                    
+                        if let Some(entry) = map.get_mut(&key) {
+                            match &mut entry.value {
+                                crate::engine::DataType::List(list) => {
+                                    let len = list.len() as i32;
+                                    
+                                    let mut s = if start < 0 { len + start } else { start };
+                                    let mut e = if stop < 0 { len + stop } else { stop };
+                    
+                                    if s > e || s >= len {
+                                        map.remove(&key);
+                                    } else {
+                                        s = std::cmp::max(0, s);
+                                        e = std::cmp::min(e, len - 1);
+                    
+                                        while list.len() as i32 > e + 1 {
+                                            list.pop_back();
+                                        }
+                                        for _ in 0..s {
+                                            list.pop_front();
+                                        }
+                    
+                                        if list.is_empty() {
+                                            map.remove(&key);
+                                        }
+                                    }
+                    
+                                    let log = format!("LTRIM {} {} {}\n", key, start, stop);
+                                    append_aof(log).await;
+                    
+                                    let _ = stream.write_all(b"+OK\r\n").await;
+                                }
+                                _ => {
+                                    let _ = stream.write_all(
+                                        b"-WRONGTYPE Operation against a key holding the wrong kind of value\r\n"
+                                    ).await;
+                                }
+                            }
+                        } else {
+                            let _ = stream.write_all(b"+OK\r\n").await;
+                        }
+                    }
+            Command::LRange(key, start, stop) => {
+                        let map = db.read().await;
+
+                        if let Some(entry) = map.get(&key) {
+                            match &entry.value {
+                                crate::engine::DataType::List(list) => {
+                                    let len = list.len() as i32;
+                                    
+                                    let s = if start < 0 { len + start } else { start };
+                                    let e = if stop < 0 { len + stop } else { stop };
+                    
+                                    if s > e || s >= len || e < 0 {
+                                        let _ = stream.write_all(b"*0\r\n").await;
+                                    } else {
+                                        let s = std::cmp::max(0, s) as usize;
+                                        let e = std::cmp::min(e, len - 1) as usize;
+                    
+                                        let mut response = format!("*{}\r\n", e - s + 1);
+                                        for i in s..=e {
+                                            if let Some(val) = list.get(i) {
+                                                response.push_str(&format!("${}\r\n{}\r\n", val.len(), val));
+                                            }
+                                        }
+                                        let _ = stream.write_all(response.as_bytes()).await;
+                                    }
+                                }
+                                _ => {
+                                    let _ = stream.write_all(
+                                        b"-WRONGTYPE Operation against a key holding the wrong kind of value\r\n"
+                                    ).await;
+                                }
+                            }
+                        } else {
+                            let _ = stream.write_all(b"*0\r\n").await;
+                        }
+                    }
             Command::RPush(key, value) => {
                         let mut map = db.write().await;
                         let entry = map.entry(key.clone()).or_insert_with(|| Entry {

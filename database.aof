@@ -1,1 +1,4 @@
+LPUSH history:general "{"type":"message","room":"general","body":"System check 1","message_id":"msg_002"}"
+LPUSH history:general "{"type":"message","room":"general","body":"System check 99","message_id":"msg_doddle"}"
 SET key:__rand_int__ "VXK"
+LPUSH history:werey "{"type":"message","room":"werey","body":"System","message_id":"sellophane"}"

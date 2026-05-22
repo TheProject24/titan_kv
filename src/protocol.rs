@@ -16,7 +16,10 @@ pub enum Command {
     Unsubscribe(String),
     LPush(String, String),
     LPop(String),
+    RPop(String),
     RPush(String, String),
+    LTrim(String, i32, i32),
+    LRange(String, i32, i32),
     HSet(String, String, String),
     HGetAll(String),
     HGet(String, String),
@@ -46,7 +49,20 @@ pub fn parse_command(parts: &[String]) -> Command {
         "UNSUBSCRIBE" if parts.len() == 2 => Command::Unsubscribe(parts[1].clone()),
         "LPUSH" if parts.len() == 3 => Command::LPush(parts[1].clone(), parts[2].clone()),
         "LPOP" if parts.len() == 2 => Command::LPop(parts[1].clone()),
+        "RPOP" if parts.len() == 2 => Command::RPop(parts[1].clone()),
         "RPUSH" if parts.len() == 3 => Command::RPush(parts[1].clone(), parts[2].clone()),
+        "LTRIM" if parts.len() == 4 => {
+            match (parts[2].parse::<i32>(), parts[3].parse::<i32>()) {
+                (Ok(start), Ok(stop)) => Command::LTrim(parts[1].clone(), start, stop),
+                _ => Command::Unknown,
+            }
+        }
+        "LRANGE" if parts.len() == 4 => {
+            match (parts[2].parse::<i32>(), parts[3].parse::<i32>()) {
+                (Ok(start), Ok(stop)) => Command::LRange(parts[1].clone(), start, stop),
+                _ => Command::Unknown,
+            }
+        }
         "HSET" if parts.len() == 4 =>
             Command::HSet(parts[1].clone(), parts[2].clone(), parts[3].clone()),
         "HGETALL" if parts.len() == 2 => Command::HGetAll(parts[1].clone()),

@@ -132,6 +132,9 @@ Before Tokio took over async dispatch, Titan KV shipped a fully hand-rolled OS t
 | `LPUSH`       | `LPUSH key value`         | `:<length>`                | Push an element to the head of a list           |
 | `RPUSH`       | `RPUSH key value`         | `:<length>`                | Push an element to the tail of a list           |
 | `LPOP`        | `LPOP key`                | `$<len>\r\n<val>`          | Pop an element from the head of a list          |
+| `RPOP`        | `RPOP key`                | `$<len>\r\n<val>`          | Pop an element from the tail of a list          |
+| `LTRIM`       | `LTRIM key start stop`    | `+OK`                      | Trim a list to the specified range              |
+| `LRANGE`      | `LRANGE key start stop`   | `*<count>\r\n...`          | Get a range of elements from a list             |
 | **Hashes**    |                           |                            |                                                 |
 | `HSET`        | `HSET key fld val`        | `+OK`                      | Add or update a field in a hash map             |
 | `HGET`        | `HGET key field`          | `$<len>\r\n<val>` or `$-1` | Get the value of a field in a hash map          |
