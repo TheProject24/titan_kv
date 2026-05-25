@@ -18,6 +18,8 @@ pub enum Command {
     LPop(String),
     RPop(String),
     RPush(String, String),
+    RPopLPush(String, String),
+    LRem(String, i64, String),
     LTrim(String, i32, i32),
     LRange(String, i32, i32),
     HSet(String, String, String),
@@ -51,6 +53,11 @@ pub fn parse_command(parts: &[String]) -> Command {
         "LPOP" if parts.len() == 2 => Command::LPop(parts[1].clone()),
         "RPOP" if parts.len() == 2 => Command::RPop(parts[1].clone()),
         "RPUSH" if parts.len() == 3 => Command::RPush(parts[1].clone(), parts[2].clone()),
+        "RPOPLPUSH" if parts.len() == 3 => Command::RPopLPush(parts[1].clone(), parts[2].clone()),
+        "LREM" if parts.len() == 4 => {
+            let count = parts[2].parse::<i64>().unwrap_or(1);
+            Command::LRem(parts[1].clone(), count, parts[2].clone())
+        }
         "LTRIM" if parts.len() == 4 => {
             match (parts[2].parse::<i32>(), parts[3].parse::<i32>()) {
                 (Ok(start), Ok(stop)) => Command::LTrim(parts[1].clone(), start, stop),

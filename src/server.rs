@@ -439,12 +439,73 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                             let _ = stream.write_all(b"$-1\r\n").await;
                         }
                     }
-            Command::Unknown => {
-                        if let Err(e) = stream.write_all(b"-ERR unknown command\r\n").await {
-                            crate::log_error!("Server", "Failed to write to client: {}", e);
-                            break;
+            Command::RPopLPush(source, destination) => {
+                let mut map = db.write().await;
+
+                let popped_val = if let Some(entry) = map.get_mut(&source) {
+                    if let crate::engine::DataType::List(list) = &mut entry.value {
+                        list.pop_back()
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                match popped_val {
+                    Some(val) => {
+                        let dest_entry = map.entry(destination.clone()).or_insert_with(|| Entry {
+                            value: crate::engine::DataType::List(std::collections::VecDeque::new()),
+                            expires_at: None,
+                        });
+
+                        if let crate::engine::DataType::List(dest_list) = &mut dest_entry.value {
+                            dest_list.push_front(val.clone());
+
+                            let mut file = OpenOptions::new().create(true).append(true).open("database.aof").await.unwrap();
+                            let log = format!("RPOPLPUSH {} {}\n", source, destination);
+                            let _ = file.write_all(log.as_bytes()).await;
+
+                            let response = format!("${}\r\n{}\r\n", val.len(), val);
+                            let _ = stream.write_all(response.as_bytes()).await;
+                        } else {
+                            let _ = stream.write_all(b"-WRONGTYPE Destination is no a list\r\n").await;
                         }
                     }
+                    None => {
+                        let _ = stream.write_all(b"$-1\r\n").await;
+                    }
+                }
+            }
+            Command::LRem(key, _count, value_to_remove) => {
+                let mut map = db.write().await;
+                let mut removed = false;
+
+                if let Some(entry) = map.get_mut(&key) {
+                    if let crate::engine::DataType::List(list) = &mut entry.value {
+                        if let Some(index) = list.iter().position(|x| x == &value_to_remove) {
+                            list.remove(index);
+                            removed = true;
+                        }
+                    }
+                }
+
+                if removed {
+                    let mut file = OpenOptions::new().create(true).append(true).open("database.aof").await.unwrap();
+                    let log = format!("LREM {} 1 \"{}\"\n", key, value_to_remove);
+                    let _ = file.write_all(log.as_bytes()).await;
+
+                    let _ = stream.write_all(b":1\r\n").await;
+                } else {
+                    let _ = stream.write_all(b":0\r\n").await;
+                }
+            }
+            Command::Unknown => {
+                if let Err(e) = stream.write_all(b"-ERR unknown command\r\n").await {
+                    crate::log_error!("Server", "Failed to write to client: {}", e);
+                    break;
+                }
+            }
         }
     }
 }
