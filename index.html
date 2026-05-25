@@ -40,7 +40,7 @@ body { background: var(--bg); color: var(--text); font-family: var(--sans); line
 /* ── PROGRESS ── */
 #prog {
   position: fixed; top: 0; left: var(--nav-w); right: 0; height: 2px; z-index: 300;
-  background: linear-gradient(90deg, var(--rust2), var(--cyan));
+  background: linear-gradient(90deg, var(--rust2), var(--cyan), var(--purple));
   transform-origin: left; transform: scaleX(0); transition: transform .08s linear;
 }
 
@@ -55,6 +55,12 @@ body { background: var(--bg); color: var(--text); font-family: var(--sans); line
 }
 .sb-logo { font-family: var(--mono); font-size: 12px; font-weight: 700; letter-spacing: 3px; color: var(--rust2); }
 .sb-ver  { font-family: var(--mono); font-size: 10px; color: var(--muted); margin-top: 3px; }
+.sb-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  margin-top: 8px; padding: 2px 7px; border-radius: 3px; font-family: var(--mono);
+  font-size: 9px; font-weight: 600; letter-spacing: 1px;
+  background: rgba(0,255,136,.1); border: 1px solid rgba(0,255,136,.25); color: var(--green);
+}
 .sb-links { padding: 14px 0; flex: 1; }
 .sb-cat {
   padding: 6px 20px 3px; font-size: 9px; font-weight: 700; letter-spacing: 2px;
@@ -82,7 +88,8 @@ body { background: var(--bg); color: var(--text); font-family: var(--sans); line
   position: absolute; inset: 0; pointer-events: none;
   background:
     radial-gradient(ellipse 90% 60% at 50% -10%, rgba(224,92,26,.09) 0%, transparent 60%),
-    radial-gradient(ellipse 55% 55% at 90% 90%, rgba(0,212,255,.05) 0%, transparent 60%);
+    radial-gradient(ellipse 55% 55% at 90% 90%, rgba(0,212,255,.05) 0%, transparent 60%),
+    radial-gradient(ellipse 40% 40% at 10% 80%, rgba(139,92,246,.04) 0%, transparent 60%);
 }
 .hero-grid {
   position: absolute; inset: 0; pointer-events: none;
@@ -91,7 +98,7 @@ body { background: var(--bg); color: var(--text); font-family: var(--sans); line
     linear-gradient(90deg, rgba(28,28,48,.35) 1px, transparent 1px);
   background-size: 44px 44px;
 }
-.hero-inner { position: relative; z-index: 1; max-width: 900px; }
+.hero-inner { position: relative; z-index: 1; max-width: 940px; }
 .ascii {
   font-family: var(--mono); font-size: clamp(5.5px,1.05vw,12.5px); line-height: 1.2;
   white-space: pre; color: var(--rust2); margin-bottom: 30px;
@@ -115,6 +122,7 @@ body { background: var(--bg); color: var(--text); font-family: var(--sans); line
 .b-tokio  { background: rgba(139,92,246,.1);  border-color: rgba(139,92,246,.4);  color: var(--purple); }
 .b-docker { background: rgba(0,212,255,.08);  border-color: rgba(0,212,255,.3);   color: var(--cyan);   }
 .b-safe   { background: rgba(0,255,136,.08);  border-color: rgba(0,255,136,.3);   color: var(--green);  }
+.b-shard  { background: rgba(251,191,36,.08); border-color: rgba(251,191,36,.3);  color: var(--yellow); }
 
 .cta { display: flex; gap: 10px; flex-wrap: wrap; }
 .btn {
@@ -153,7 +161,7 @@ section { padding: 80px 64px; border-bottom: 1px solid var(--border); }
   background: var(--bg-card); border: 1px solid var(--border);
   border-radius: 12px; padding: 36px; overflow-x: auto;
 }
-.arch-wrap svg { max-width: 760px; width: 100%; min-width: 580px; display: block; margin: 0 auto; }
+.arch-wrap svg { max-width: 780px; width: 100%; min-width: 580px; display: block; margin: 0 auto; }
 
 /* ── CARDS GRID ── */
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px,1fr)); gap: 18px; }
@@ -172,9 +180,26 @@ section { padding: 80px 64px; border-bottom: 1px solid var(--border); }
 .ic-c { background: rgba(0,212,255,.1);  }
 .ic-p { background: rgba(139,92,246,.1); }
 .ic-g { background: rgba(0,255,136,.1);  }
+.ic-y { background: rgba(251,191,36,.1); }
 .card-title { font-family: var(--mono); font-size: 13.5px; font-weight: 700; color: var(--text); }
 .card-file  { font-family: var(--mono); font-size: 10px; color: var(--rust); margin: 3px 0 11px; }
 .card-body  { font-size: 12.5px; color: var(--muted); line-height: 1.72; }
+
+/* ── SHARD VISUAL ── */
+.shard-vis {
+  display: flex; gap: 3px; flex-wrap: wrap; margin: 18px 0;
+  padding: 16px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+}
+.shard-block {
+  width: 22px; height: 22px; border-radius: 3px;
+  background: rgba(0,212,255,.08); border: 1px solid rgba(0,212,255,.2);
+  font-family: var(--mono); font-size: 6px; color: var(--dim);
+  display: flex; align-items: center; justify-content: center;
+  transition: all .2s;
+}
+.shard-block.active { background: rgba(255,107,53,.2); border-color: rgba(255,107,53,.5); color: var(--rust2); }
+.shard-block:hover { background: rgba(0,212,255,.15); border-color: var(--cyan); color: var(--cyan); }
+.shard-label { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-bottom: 8px; }
 
 /* ── COMMAND EXPLORER ── */
 .cmd-tabs {
@@ -204,6 +229,13 @@ section { padding: 80px 64px; border-bottom: 1px solid var(--border); }
 .cs { font-family: var(--mono); font-size: 11.5px; color: var(--cyan); background: rgba(0,212,255,.07); padding: 3px 7px; border-radius: 4px; white-space: nowrap; }
 .cr { font-family: var(--mono); font-size: 11px; color: var(--green); }
 .cn2 { font-size: 12px; color: var(--muted); }
+.cmd-new {
+  display: inline-flex; align-items: center; margin-left: 6px;
+  padding: 1px 5px; border-radius: 3px; font-family: var(--mono);
+  font-size: 8px; font-weight: 700; letter-spacing: 1px;
+  background: rgba(0,255,136,.1); border: 1px solid rgba(0,255,136,.3); color: var(--green);
+  vertical-align: middle;
+}
 
 /* ── TERMINAL ── */
 .term {
@@ -220,7 +252,7 @@ section { padding: 80px 64px; border-bottom: 1px solid var(--border); }
 .term-body { padding: 20px; font-family: var(--mono); font-size: 12.5px; line-height: 1.85; }
 .tp { color: var(--green); } .tc { color: var(--text); } .to { color: var(--muted); }
 .ts { color: var(--cyan); }  .tn { color: var(--yellow); } .tk { color: var(--dim); }
-.tg { color: var(--green); }
+.tg { color: var(--green); } .tw { color: var(--rust2); }
 
 /* ── AOF SIMULATOR ── */
 .aof-box { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
@@ -248,6 +280,43 @@ section { padding: 80px 64px; border-bottom: 1px solid var(--border); }
 .tg-lazy   { background: rgba(251,191,36,.1);  color: var(--yellow); border: 1px solid rgba(251,191,36,.3); }
 .tg-active { background: rgba(0,212,255,.1);   color: var(--cyan);   border: 1px solid rgba(0,212,255,.3);  }
 .exp-body { font-size: 12.5px; color: var(--muted); line-height: 1.75; }
+
+/* ── CONCURRENCY GRID ── */
+.concurrency-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px,1fr)); gap: 16px; margin-bottom: 28px; }
+.conc-card {
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
+  padding: 22px; position: relative; overflow: hidden;
+}
+.conc-card::after {
+  content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+  opacity: 0; transition: opacity .3s;
+}
+.conc-card:hover::after { opacity: 1; }
+.conc-num { font-family: var(--mono); font-size: 28px; font-weight: 700; color: var(--cyan); margin-bottom: 6px; }
+.conc-lbl { font-family: var(--mono); font-size: 12px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
+.conc-body { font-size: 12px; color: var(--muted); line-height: 1.7; }
+
+/* ── JOB QUEUE DIAGRAM ── */
+.queue-flow {
+  display: flex; align-items: center; gap: 0; margin: 24px 0;
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
+  padding: 24px; overflow-x: auto;
+}
+.q-box {
+  flex: 1; min-width: 120px; padding: 14px 16px; border-radius: 8px;
+  border: 1px solid var(--border2); text-align: center;
+}
+.q-box-title { font-family: var(--mono); font-size: 11px; font-weight: 700; margin-bottom: 6px; }
+.q-box-body  { font-family: var(--mono); font-size: 10px; color: var(--muted); line-height: 1.6; }
+.q-box.pending  { background: rgba(224,92,26,.07); border-color: rgba(224,92,26,.3); }
+.q-box.pending .q-box-title { color: var(--rust2); }
+.q-box.processing { background: rgba(0,212,255,.07); border-color: rgba(0,212,255,.3); }
+.q-box.processing .q-box-title { color: var(--cyan); }
+.q-box.done { background: rgba(0,255,136,.07); border-color: rgba(0,255,136,.3); }
+.q-box.done .q-box-title { color: var(--green); }
+.q-arrow { padding: 0 10px; font-family: var(--mono); font-size: 12px; color: var(--dim); flex-shrink: 0; text-align: center; }
+.q-arrow-lbl { font-size: 9px; color: var(--purple); display: block; white-space: nowrap; }
 
 /* ── DOCKER BOX ── */
 .docker-hi {
@@ -280,11 +349,15 @@ section { padding: 80px 64px; border-bottom: 1px solid var(--border); }
   background: var(--bg-card); border: 2px solid var(--border2);
   display: flex; align-items: center; justify-content: center; font-size: 16px; z-index: 1;
 }
+.rm-dot.done {
+  background: rgba(0,255,136,.08); border-color: rgba(0,255,136,.4);
+}
 .rm-body { flex: 1; padding-top: 8px; }
 .rm-title { font-family: var(--mono); font-size: 14.5px; font-weight: 700; margin-bottom: 7px; }
 .rm-desc { font-size: 12.5px; color: var(--muted); line-height: 1.75; margin-bottom: 11px; }
 .rm-tags { display: flex; gap: 6px; flex-wrap: wrap; }
 .rm-tag { font-family: var(--mono); font-size: 10px; padding: 2px 8px; border-radius: 3px; background: var(--bg-surf); border: 1px solid var(--border); color: var(--muted); }
+.rm-tag.done-tag { background: rgba(0,255,136,.08); border-color: rgba(0,255,136,.3); color: var(--green); }
 
 /* ── FILE TREE ── */
 .ftree { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 22px; font-family: var(--mono); font-size: 12.5px; }
@@ -323,6 +396,8 @@ footer span { color: var(--rust); }
   .mob-toggle { display: flex; }
   .aof-panels, .expiry-grid { grid-template-columns: 1fr; }
   .aof-panel:first-child { border-right: none; border-bottom: 1px solid var(--border); }
+  .queue-flow { flex-direction: column; }
+  .q-arrow { transform: rotate(90deg); }
 }
 </style>
 </head>
@@ -335,7 +410,8 @@ footer span { color: var(--rust); }
 <nav class="sidebar" id="sb">
   <div class="sb-brand">
     <div class="sb-logo">TITAN KV</div>
-    <div class="sb-ver">v0.1.0 · Rust 2024 Edition</div>
+    <div class="sb-ver">v0.2.0 · Rust 2024 Edition</div>
+    <div class="sb-badge">64 Shards</div>
   </div>
   <div class="sb-links">
     <div class="sb-cat">Overview</div>
@@ -344,10 +420,12 @@ footer span { color: var(--rust); }
     <div class="sb-cat">Internals</div>
     <a href="#architecture" class="sb-link">Architecture</a>
     <a href="#components"   class="sb-link">Components</a>
+    <a href="#sharding"     class="sb-link">Sharding Engine</a>
     <div class="sb-cat">Reference</div>
     <a href="#commands"     class="sb-link">Commands</a>
     <a href="#persistence"  class="sb-link">Persistence (AOF)</a>
     <a href="#expiration"   class="sb-link">Expiration</a>
+    <a href="#jobqueue"     class="sb-link">Job Queue</a>
     <div class="sb-cat">Usage</div>
     <a href="#start"        class="sb-link">Getting Started</a>
     <a href="#docker"       class="sb-link">Docker</a>
@@ -382,16 +460,19 @@ footer span { color: var(--rust); }
       <span class="badge b-tokio"> ⚡ Async · Tokio</span>
       <span class="badge b-docker">🐳 Docker Ready</span>
       <span class="badge b-safe">  ✓ Zero unsafe blocks</span>
+      <span class="badge b-shard"> ⬡ 64-Shard Engine</span>
     </div>
 
     <div class="cta">
       <a href="#start"        class="btn btn-p">→ Get Started</a>
-      <a href="#architecture" class="btn btn-s">⌥ Architecture</a>
+      <a href="#sharding"     class="btn btn-s">⬡ Sharding</a>
+      <a href="#jobqueue"     class="btn btn-s">⚙ Job Queue</a>
       <a href="#commands"     class="btn btn-s">⌗ Commands</a>
     </div>
 
     <div class="stats">
-      <div><div class="stat-n">19</div><div class="stat-l">Commands</div></div>
+      <div><div class="stat-n">21</div><div class="stat-l">Commands</div></div>
+      <div><div class="stat-n">64</div><div class="stat-l">Shards</div></div>
       <div><div class="stat-n">3</div> <div class="stat-l">Data Types</div></div>
       <div><div class="stat-n">6379</div><div class="stat-l">Default Port</div></div>
       <div><div class="stat-n">0</div> <div class="stat-l">unsafe blocks</div></div>
@@ -415,9 +496,9 @@ footer span { color: var(--rust); }
     <code>redis-cli</code>, <code>nc</code>, your application's existing Redis library — can connect without modification.
   </p>
   <p style="font-size:13.5px;color:var(--muted);line-height:1.8;max-width:700px;">
-    The goal is not to beat Redis. The goal is to understand what it takes to build something like it:
-    the concurrency model, the durability guarantees, the expiration mechanics, the persistence format.
-    Every line of Titan KV exists as a deliberate engineering decision.
+    The engine now runs a <strong style="color:var(--text)">64-shard architecture</strong> — each key is hash-routed to one of 64 independent
+    <code>RwLock</code> shards, allowing up to 64 concurrent writers with zero contention. New queue primitives
+    (<code>RPOPLPUSH</code>, <code>LREM</code>) power reliable, crash-safe job processing patterns.
   </p>
 </section>
 
@@ -428,12 +509,13 @@ footer span { color: var(--rust); }
   <div class="sec-num">02 / Internals</div>
   <h2 class="sec-title">Architecture</h2>
   <p class="sec-sub">
-    Each client connection is an independent Tokio task. A single <code>Arc&lt;RwLock&lt;...&gt;&gt;</code>
-    guards in-memory state. Three background tasks manage expiration, AOF logging, and periodic compaction.
+    Each client connection is an independent Tokio task. A <code>ShardedDb</code> of 64 independent
+    <code>RwLock</code> shards guards in-memory state. Three background tasks manage expiration, AOF logging,
+    and periodic compaction — each aware of the full shard array.
   </p>
 
   <div class="arch-wrap">
-    <svg viewBox="0 0 720 490" xmlns="http://www.w3.org/2000/svg">
+    <svg viewBox="0 0 760 540" xmlns="http://www.w3.org/2000/svg">
       <defs>
         <marker id="ah"  markerWidth="9" markerHeight="7" refX="9" refY="3.5" orient="auto">
           <polygon points="0 0,9 3.5,0 7" fill="#00d4ff" opacity=".7"/>
@@ -441,7 +523,6 @@ footer span { color: var(--rust); }
         <marker id="ahr" markerWidth="9" markerHeight="7" refX="9" refY="3.5" orient="auto">
           <polygon points="0 0,9 3.5,0 7" fill="#ff6b35" opacity=".6"/>
         </marker>
-        <!-- gradients -->
         <linearGradient id="gR" x1="0" y1="0" x2="1" y2="0">
           <stop offset="0%"   stop-color="#1c0a04"/>
           <stop offset="100%" stop-color="#230e06"/>
@@ -462,70 +543,91 @@ footer span { color: var(--rust); }
           <stop offset="0%"   stop-color="#0e0e1a"/>
           <stop offset="100%" stop-color="#11111f"/>
         </linearGradient>
-        <!-- animated flow path -->
-        <path id="flowpath" d="M360 82 L360 122" fill="none"/>
+        <path id="flowpath" d="M380 82 L380 122" fill="none"/>
       </defs>
 
       <!-- bg -->
-      <rect width="720" height="490" fill="#09090f" rx="8"/>
+      <rect width="760" height="540" fill="#09090f" rx="8"/>
 
       <!-- CLIENT -->
-      <rect x="235" y="18" width="250" height="64" rx="6" fill="url(#gR)" stroke="#e05c1a" stroke-width="1" stroke-opacity=".5"/>
-      <text x="360" y="44" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="13" font-weight="bold" fill="#e0e0f0">CLIENT</text>
-      <text x="360" y="62" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9.5" fill="#606080">redis-cli · nc · any TCP client</text>
+      <rect x="255" y="18" width="250" height="64" rx="6" fill="url(#gR)" stroke="#e05c1a" stroke-width="1" stroke-opacity=".5"/>
+      <text x="380" y="44" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="13" font-weight="bold" fill="#e0e0f0">CLIENT</text>
+      <text x="380" y="62" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9.5" fill="#606080">redis-cli · nc · any TCP client</text>
 
       <!-- TCP arrow -->
-      <line x1="360" y1="82" x2="360" y2="122" stroke="#00d4ff" stroke-width="1.5" stroke-opacity=".6" marker-end="url(#ah)"/>
-      <text x="367" y="106" font-family="JetBrains Mono,monospace" font-size="9.5" fill="#00d4ff" opacity=".7">TCP :6379</text>
+      <line x1="380" y1="82" x2="380" y2="122" stroke="#00d4ff" stroke-width="1.5" stroke-opacity=".6" marker-end="url(#ah)"/>
+      <text x="387" y="106" font-family="JetBrains Mono,monospace" font-size="9.5" fill="#00d4ff" opacity=".7">TCP :6379</text>
 
       <!-- SERVER.RS -->
-      <rect x="120" y="122" width="480" height="92" rx="6" fill="url(#gB)" stroke="#182040" stroke-width="1.2"/>
-      <text x="360" y="147" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="12" font-weight="bold" fill="#ff6b35">server.rs</text>
-      <text x="360" y="165" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="10" fill="#606090">TcpListener → tokio::spawn per connection</text>
-      <text x="360" y="181" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="10" fill="#00d4ff">read_resp() → parse_command() → dispatch</text>
-      <text x="360" y="197" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9"  fill="#404060">BufReader · AsyncReadExt · AOF writes</text>
+      <rect x="120" y="122" width="520" height="92" rx="6" fill="url(#gB)" stroke="#182040" stroke-width="1.2"/>
+      <text x="380" y="147" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="12" font-weight="bold" fill="#ff6b35">server.rs</text>
+      <text x="380" y="165" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="10" fill="#606090">TcpListener → tokio::spawn per connection</text>
+      <text x="380" y="181" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="10" fill="#00d4ff">read_resp() → parse_command() → dispatch</text>
+      <text x="380" y="197" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9"  fill="#404060">RPOPLPUSH · cross-shard · write_multi_shards()</text>
 
       <!-- arrows server → protocol / engine -->
-      <line x1="195" y1="214" x2="130" y2="255" stroke="#ff6b35" stroke-width="1.2" stroke-opacity=".5" marker-end="url(#ahr)"/>
-      <line x1="360" y1="214" x2="360" y2="255" stroke="#00d4ff" stroke-width="1.5" stroke-opacity=".6" marker-end="url(#ah)"/>
+      <line x1="210" y1="214" x2="140" y2="258" stroke="#ff6b35" stroke-width="1.2" stroke-opacity=".5" marker-end="url(#ahr)"/>
+      <line x1="380" y1="214" x2="380" y2="258" stroke="#00d4ff" stroke-width="1.5" stroke-opacity=".6" marker-end="url(#ah)"/>
 
       <!-- PROTOCOL.RS -->
-      <rect x="20" y="255" width="220" height="88" rx="6" fill="url(#gP)" stroke="#241840" stroke-width="1"/>
-      <text x="130" y="277" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="12" font-weight="bold" fill="#ff6b35">protocol.rs</text>
-      <text x="130" y="294" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9.5" fill="#606090">RESP parser → Command enum</text>
-      <text x="130" y="310" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9.5" fill="#00d4ff">SET · GET · LISTS · HASHES</text>
-      <text x="130" y="326" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9.5" fill="#00d4ff">PUBSUB · INCR · SETEX · DEL</text>
+      <rect x="22" y="258" width="220" height="100" rx="6" fill="url(#gP)" stroke="#241840" stroke-width="1"/>
+      <text x="132" y="280" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="12" font-weight="bold" fill="#ff6b35">protocol.rs</text>
+      <text x="132" y="298" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9.5" fill="#606090">RESP parser → Command enum</text>
+      <text x="132" y="314" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9.5" fill="#00d4ff">SET · GET · INCR · SETEX · DEL</text>
+      <text x="132" y="330" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9.5" fill="#00d4ff">LISTS · HASHES · PUBSUB</text>
+      <text x="132" y="346" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9.5" fill="#fbbf24">RPOPLPUSH · LREM</text>
 
-      <!-- ENGINE.RS -->
-      <rect x="265" y="255" width="250" height="108" rx="6" fill="url(#gD)" stroke="#1e1e38" stroke-width="1.5"/>
-      <text x="390" y="278" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="12" font-weight="bold" fill="#ff6b35">engine.rs</text>
-      <text x="390" y="296" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9.5" fill="#00d4ff">Arc&lt;RwLock&lt;HashMap&lt;String, Entry&gt;&gt;&gt;</text>
-      <text x="390" y="313" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9.5" fill="#606090">DataType: String | List | HashMap</text>
-      <text x="390" y="329" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9.5" fill="#606090">expires_at: Option&lt;SystemTime&gt;</text>
-      <text x="390" y="345" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9"   fill="#404060">RwLock → N readers | 1 writer</text>
+      <!-- ENGINE.RS (ShardedDb) -->
+      <rect x="268" y="258" width="300" height="148" rx="6" fill="url(#gD)" stroke="#1e1e38" stroke-width="1.5"/>
+      <text x="418" y="280" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="12" font-weight="bold" fill="#ff6b35">engine.rs — ShardedDb</text>
+      <text x="418" y="298" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9.5" fill="#00d4ff">Arc&lt;[RwLock&lt;HashMap&lt;String, Entry&gt;&gt;; 64]&gt;</text>
+      <text x="418" y="314" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9.5" fill="#606090">shard_index = hash(key) &amp; 0x3F</text>
+
+      <!-- shard boxes -->
+      <rect x="283" y="323" width="20" height="14" rx="2" fill="rgba(255,107,53,.2)" stroke="rgba(255,107,53,.5)" stroke-width="1"/>
+      <rect x="307" y="323" width="20" height="14" rx="2" fill="rgba(0,212,255,.1)" stroke="rgba(0,212,255,.3)" stroke-width="1"/>
+      <rect x="331" y="323" width="20" height="14" rx="2" fill="rgba(0,212,255,.1)" stroke="rgba(0,212,255,.3)" stroke-width="1"/>
+      <rect x="355" y="323" width="20" height="14" rx="2" fill="rgba(0,212,255,.1)" stroke="rgba(0,212,255,.3)" stroke-width="1"/>
+      <text x="393" y="333" font-family="JetBrains Mono,monospace" font-size="9" fill="#404060">···</text>
+      <rect x="410" y="323" width="20" height="14" rx="2" fill="rgba(0,212,255,.1)" stroke="rgba(0,212,255,.3)" stroke-width="1"/>
+      <rect x="434" y="323" width="20" height="14" rx="2" fill="rgba(139,92,246,.15)" stroke="rgba(139,92,246,.4)" stroke-width="1"/>
+      <rect x="458" y="323" width="20" height="14" rx="2" fill="rgba(0,212,255,.1)" stroke="rgba(0,212,255,.3)" stroke-width="1"/>
+      <rect x="482" y="323" width="20" height="14" rx="2" fill="rgba(0,212,255,.1)" stroke="rgba(0,212,255,.3)" stroke-width="1"/>
+      <text x="507" y="333" font-family="JetBrains Mono,monospace" font-size="9" fill="#404060">···</text>
+      <rect x="522" y="323" width="20" height="14" rx="2" fill="rgba(0,212,255,.1)" stroke="rgba(0,212,255,.3)" stroke-width="1"/>
+      <text x="283" y="350" font-family="JetBrains Mono,monospace" font-size="8.5" fill="#606080">S0</text>
+      <text x="307" y="350" font-family="JetBrains Mono,monospace" font-size="8.5" fill="#606080">S1</text>
+      <text x="331" y="350" font-family="JetBrains Mono,monospace" font-size="8.5" fill="#606080">S2</text>
+      <text x="355" y="350" font-family="JetBrains Mono,monospace" font-size="8.5" fill="#606080">S3</text>
+      <text x="410" y="350" font-family="JetBrains Mono,monospace" font-size="8.5" fill="#8b5cf6">Sk</text>
+      <text x="434" y="350" font-family="JetBrains Mono,monospace" font-size="8.5" fill="#8b5cf6">Sk</text>
+      <text x="522" y="350" font-family="JetBrains Mono,monospace" font-size="8.5" fill="#606080">S63</text>
+
+      <text x="418" y="376" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9"   fill="#404060">64 independent RwLocks · N readers | 1 writer per shard</text>
+      <text x="418" y="392" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9"   fill="#404060">cross-shard: ordered lock acquisition (deadlock-free)</text>
 
       <!-- arrows engine → background tasks -->
-      <line x1="300" y1="363" x2="165" y2="405" stroke="#ff6b35" stroke-width="1" stroke-opacity=".4" marker-end="url(#ahr)"/>
-      <line x1="390" y1="363" x2="390" y2="405" stroke="#ff6b35" stroke-width="1" stroke-opacity=".4" marker-end="url(#ahr)"/>
-      <line x1="470" y1="363" x2="590" y2="405" stroke="#ff6b35" stroke-width="1" stroke-opacity=".4" marker-end="url(#ahr)"/>
+      <line x1="318" y1="406" x2="175" y2="450" stroke="#ff6b35" stroke-width="1" stroke-opacity=".4" marker-end="url(#ahr)"/>
+      <line x1="418" y1="406" x2="418" y2="450" stroke="#ff6b35" stroke-width="1" stroke-opacity=".4" marker-end="url(#ahr)"/>
+      <line x1="510" y1="406" x2="625" y2="450" stroke="#ff6b35" stroke-width="1" stroke-opacity=".4" marker-end="url(#ahr)"/>
 
       <!-- AOF LOG -->
-      <rect x="60" y="405" width="170" height="58" rx="6" fill="url(#gG)" stroke="#0c2a1c" stroke-width="1"/>
-      <text x="145" y="426" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="11" font-weight="bold" fill="#ff6b35">AOF Log</text>
-      <text x="145" y="442" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9.5" fill="#606090">Append on write</text>
-      <text x="145" y="456" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9.5" fill="#00d4ff">SET · DEL · INCR · LPUSH</text>
+      <rect x="70" y="450" width="205" height="62" rx="6" fill="url(#gG)" stroke="#0c2a1c" stroke-width="1"/>
+      <text x="172" y="472" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="11" font-weight="bold" fill="#ff6b35">AOF Log</text>
+      <text x="172" y="488" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9.5" fill="#606090">Append on write · all commands</text>
+      <text x="172" y="503" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9.5" fill="#00d4ff">SET · DEL · RPOPLPUSH · LREM</text>
 
       <!-- SWEEPER -->
-      <rect x="300" y="405" width="180" height="58" rx="6" fill="url(#gB)" stroke="#0c1828" stroke-width="1"/>
-      <text x="390" y="426" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="11" font-weight="bold" fill="#ff6b35">Expiry Sweeper</text>
-      <text x="390" y="442" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9.5" fill="#606090">10s tick · evicts stale keys</text>
-      <text x="390" y="456" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9.5" fill="#00d4ff">DEL entries → AOF</text>
+      <rect x="318" y="450" width="200" height="62" rx="6" fill="url(#gB)" stroke="#0c1828" stroke-width="1"/>
+      <text x="418" y="472" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="11" font-weight="bold" fill="#ff6b35">Expiry Sweeper</text>
+      <text x="418" y="488" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9.5" fill="#606090">10s tick · iterates all 64 shards</text>
+      <text x="418" y="503" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9.5" fill="#00d4ff">DEL entries → AOF</text>
 
       <!-- COMPACTOR -->
-      <rect x="515" y="405" width="180" height="58" rx="6" fill="url(#gP)" stroke="#1a0c2a" stroke-width="1"/>
-      <text x="605" y="426" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="11" font-weight="bold" fill="#ff6b35">AOF Compactor</text>
-      <text x="605" y="442" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9.5" fill="#606090">60s tick · rewrites AOF</text>
-      <text x="605" y="456" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9.5" fill="#00d4ff">atomic rename → disk</text>
+      <rect x="548" y="450" width="185" height="62" rx="6" fill="url(#gP)" stroke="#1a0c2a" stroke-width="1"/>
+      <text x="640" y="472" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="11" font-weight="bold" fill="#ff6b35">AOF Compactor</text>
+      <text x="640" y="488" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9.5" fill="#606090">60s tick · scans all 64 shards</text>
+      <text x="640" y="503" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9.5" fill="#00d4ff">atomic rename → disk</text>
 
       <!-- Animated flow dot -->
       <circle r="3.5" fill="#00d4ff" opacity=".9">
@@ -549,20 +651,20 @@ footer span { color: var(--rust); }
     <div class="card">
       <div class="card-icon ic-r">🦀</div>
       <div class="card-title">engine.rs</div>
-      <div class="card-file">The Heart</div>
-      <div class="card-body">The database is a single type: <code>Arc&lt;RwLock&lt;HashMap&lt;String, Entry&gt;&gt;&gt;</code>. <code>Arc</code> enables shared ownership across async tasks. <code>RwLock</code> allows unlimited concurrent readers while serializing writes. Each <code>Entry</code> holds a <code>DataType</code> variant and an <code>expires_at: Option&lt;SystemTime&gt;</code>.</div>
+      <div class="card-file">The Heart — ShardedDb</div>
+      <div class="card-body">The database is a <code>ShardedDb</code>: an <code>Arc</code>-wrapped array of <strong style="color:var(--text)">64 independent <code>RwLock&lt;HashMap&lt;String, Entry&gt;&gt;</code> shards</strong>. Each key hashes to exactly one shard (<code>hash(key) & 0x3F</code>). <code>write_multi_shards()</code> handles cross-shard ops with ordered lock acquisition to prevent deadlock.</div>
     </div>
     <div class="card">
       <div class="card-icon ic-c">🌐</div>
       <div class="card-title">server.rs</div>
       <div class="card-file">The Listener</div>
-      <div class="card-body">A Tokio <code>TcpListener</code> accepts connections in a tight loop. Each accepted connection is handed off to <code>tokio::spawn</code>, giving every client its own lightweight async task. Manages RESP input, command dispatch, AOF writes, and response serialization for all 19 commands.</div>
+      <div class="card-body">A Tokio <code>TcpListener</code> accepts connections in a tight loop. Each accepted connection is handed off to <code>tokio::spawn</code>, giving every client its own lightweight async task. Manages RESP input, command dispatch against the sharded DB, AOF writes, and response serialization for all 21 commands.</div>
     </div>
     <div class="card">
       <div class="card-icon ic-p">⟨/⟩</div>
       <div class="card-title">protocol.rs</div>
       <div class="card-file">The Parser</div>
-      <div class="card-body">A complete RESP-compatible reader and parser. <code>read_resp()</code> handles both raw text and RESP array framing. <code>parse_command()</code> tokenizes the stream and returns a strongly-typed <code>Command</code> enum covering all scalar, list, hash, and pubsub operations.</div>
+      <div class="card-body">A complete RESP-compatible reader and parser. <code>read_resp()</code> handles both raw text and RESP array framing. <code>parse_command()</code> returns a strongly-typed <code>Command</code> enum covering all scalar, list, hash, pubsub, and queue operations including <code>RPOPLPUSH</code> and <code>LREM</code>.</div>
     </div>
     <div class="card">
       <div class="card-icon ic-c">📡</div>
@@ -580,7 +682,7 @@ footer span { color: var(--rust); }
       <div class="card-icon ic-r">🔧</div>
       <div class="card-title">main.rs</div>
       <div class="card-file">The Orchestrator</div>
-      <div class="card-body">Startup pipeline: (1) AOF replay — line-by-line command re-execution to restore in-memory state. (2) Spawn active expiration sweeper (10s tick). (3) Spawn AOF compaction task (60s tick). (4) Hand off to <code>server::run()</code>.</div>
+      <div class="card-body">Startup pipeline: (1) AOF replay — re-executes commands routing each key to the correct shard. (2) Spawn expiration sweeper (10s tick, iterates all 64 shards). (3) Spawn AOF compaction task (60s tick, scans all 64 shards). (4) Hand off to <code>server::run()</code>.</div>
     </div>
     <div class="card">
       <div class="card-icon ic-p">🧵</div>
@@ -592,15 +694,68 @@ footer span { color: var(--rust); }
 </section>
 
 <!-- ══════════════════════════════════════
+     SHARDING
+══════════════════════════════════════ -->
+<section id="sharding" class="fi">
+  <div class="sec-num">04 / Engine</div>
+  <h2 class="sec-title">64-Shard Engine</h2>
+  <p class="sec-sub">
+    The engine was refactored from a single global <code>RwLock</code> to a <code>ShardedDb</code> — an array of 64 independent shards.
+    Every key maps deterministically to exactly one shard via a 64-bit hash. Hover a shard below to see its index.
+  </p>
+
+  <div class="grid" style="margin-bottom:28px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));">
+    <div class="card" style="border-color:rgba(255,107,53,.25);">
+      <div class="card-icon ic-r">⬡</div>
+      <div class="card-title">Hash Routing</div>
+      <div class="card-file">shard = hash(key) & 0x3F</div>
+      <div class="card-body">Every operation calls <code>calculate_shard_index(key)</code> using <code>DefaultHasher</code>. The 64-bit hash is masked to 6 bits — giving 64 deterministic, evenly-distributed slots. Same key always hits same shard.</div>
+    </div>
+    <div class="card" style="border-color:rgba(0,212,255,.25);">
+      <div class="card-icon ic-c">🔀</div>
+      <div class="card-title">Cross-Shard Safety</div>
+      <div class="card-file">write_multi_shards()</div>
+      <div class="card-body"><code>RPOPLPUSH</code> may span two shards. <code>write_multi_shards()</code> always acquires the lower-index shard first — making deadlock structurally impossible. If both keys hash to the same shard, a single guard is returned.</div>
+    </div>
+    <div class="card" style="border-color:rgba(139,92,246,.25);">
+      <div class="card-icon ic-p">⚡</div>
+      <div class="card-title">Parallel Writes</div>
+      <div class="card-file">64 concurrent writers</div>
+      <div class="card-body">A writer on shard 17 does not block a writer on shard 42. Under a workload with uniform key distribution, write throughput scales linearly until hitting I/O or CPU limits — not the lock.</div>
+    </div>
+  </div>
+
+  <div class="shard-label">64 Shards — each is an independent <code>RwLock&lt;HashMap&lt;String, Entry&gt;&gt;</code></div>
+  <div class="shard-vis" id="shardVis"></div>
+
+  <div class="term" style="margin-top:20px;">
+    <div class="term-head"><div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div><div class="term-ttl">shard routing example</div></div>
+    <div class="term-body">
+      <div><span class="tk"># Each key hashes to a specific shard — independently lockable</span></div>
+      <div><span class="tc">hash("queue:jobs") &amp; 0x3F</span>  <span class="tw">→ shard 17</span></div>
+      <div><span class="tc">hash("queue:done") &amp; 0x3F</span>  <span class="tw">→ shard 42</span></div>
+      <div><span class="tc">hash("session:abc") &amp; 0x3F</span> <span class="tw">→ shard 5</span></div><br>
+      <div><span class="tk"># RPOPLPUSH — cross-shard, always deadlock-free</span></div>
+      <div><span class="tp">$</span> <span class="tc">RPOPLPUSH queue:jobs queue:done</span></div>
+      <div><span class="to">  1. acquire write guard on shard 17 (lower index)</span></div>
+      <div><span class="to">  2. acquire write guard on shard 42 (higher index)</span></div>
+      <div><span class="to">  3. pop tail of queue:jobs, push head of queue:done</span></div>
+      <div><span class="to">  4. release both guards atomically</span></div>
+      <div><span class="ts">"task:1"</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════
      COMMANDS
 ══════════════════════════════════════ -->
 <section id="commands" class="fi">
-  <div class="sec-num">04 / Reference</div>
+  <div class="sec-num">05 / Reference</div>
   <h2 class="sec-title">Command Reference</h2>
-  <p class="sec-sub">19 commands across 4 categories. All follow the Redis RESP protocol — connect with any existing Redis client, unchanged.</p>
+  <p class="sec-sub">21 commands across 4 categories. All follow the Redis RESP protocol — connect with any existing Redis client, unchanged.</p>
 
   <div class="cmd-tabs">
-    <button class="cmd-tab on"  data-cat="all">All (19)</button>
+    <button class="cmd-tab on"  data-cat="all">All (21)</button>
     <button class="cmd-tab"     data-cat="keys">Keys</button>
     <button class="cmd-tab"     data-cat="lists">Lists</button>
     <button class="cmd-tab"     data-cat="hashes">Hashes</button>
@@ -611,25 +766,27 @@ footer span { color: var(--rust); }
     <table class="cmd-table">
       <thead><tr><th>Command</th><th>Syntax</th><th>Response</th><th>Notes</th></tr></thead>
       <tbody>
-        <tr class="cmd-row show" data-cat="keys">   <td><span class="cn">PING</span></td>      <td><span class="cs">PING</span></td>                         <td><span class="cr">+PONG</span></td>                          <td><span class="cn2">Connection health check</span></td></tr>
-        <tr class="cmd-row show" data-cat="keys">   <td><span class="cn">SET</span></td>       <td><span class="cs">SET key value</span></td>                <td><span class="cr">+OK</span></td>                            <td><span class="cn2">Write to memory + AOF</span></td></tr>
-        <tr class="cmd-row show" data-cat="keys">   <td><span class="cn">GET</span></td>       <td><span class="cs">GET key</span></td>                      <td><span class="cr">$&lt;len&gt;\r\n&lt;val&gt; or $-1</span></td><td><span class="cn2">Lazy expiry check on read</span></td></tr>
-        <tr class="cmd-row show" data-cat="keys">   <td><span class="cn">DEL</span></td>       <td><span class="cs">DEL key</span></td>                      <td><span class="cr">:1 or :0</span></td>                        <td><span class="cn2">Removes key + AOF entry</span></td></tr>
-        <tr class="cmd-row show" data-cat="keys">   <td><span class="cn">EXISTS</span></td>    <td><span class="cs">EXISTS key</span></td>                   <td><span class="cr">:1 or :0</span></td>                        <td><span class="cn2">Read-only, uses RwLock read guard</span></td></tr>
-        <tr class="cmd-row show" data-cat="keys">   <td><span class="cn">INCR</span></td>      <td><span class="cs">INCR key</span></td>                     <td><span class="cr">:&lt;new_value&gt; or -ERR</span></td>       <td><span class="cn2">Atomic integer increment; errors on non-integer</span></td></tr>
-        <tr class="cmd-row show" data-cat="keys">   <td><span class="cn">SETEX</span></td>     <td><span class="cs">SETEX key seconds value</span></td>      <td><span class="cr">+OK</span></td>                            <td><span class="cn2">Write with TTL; expiry stored as SystemTime</span></td></tr>
-        <tr class="cmd-row show" data-cat="lists">  <td><span class="cn">LPUSH</span></td>     <td><span class="cs">LPUSH key value</span></td>              <td><span class="cr">:&lt;length&gt;</span></td>                  <td><span class="cn2">Push to head (VecDeque::push_front)</span></td></tr>
-        <tr class="cmd-row show" data-cat="lists">  <td><span class="cn">RPUSH</span></td>     <td><span class="cs">RPUSH key value</span></td>              <td><span class="cr">:&lt;length&gt;</span></td>                  <td><span class="cn2">Push to tail (VecDeque::push_back)</span></td></tr>
-        <tr class="cmd-row show" data-cat="lists">  <td><span class="cn">LPOP</span></td>      <td><span class="cs">LPOP key</span></td>                     <td><span class="cr">$&lt;len&gt;\r\n&lt;val&gt;</span></td>        <td><span class="cn2">Pop from head</span></td></tr>
-        <tr class="cmd-row show" data-cat="lists">  <td><span class="cn">RPOP</span></td>      <td><span class="cs">RPOP key</span></td>                     <td><span class="cr">$&lt;len&gt;\r\n&lt;val&gt;</span></td>        <td><span class="cn2">Pop from tail</span></td></tr>
-        <tr class="cmd-row show" data-cat="lists">  <td><span class="cn">LTRIM</span></td>     <td><span class="cs">LTRIM key start stop</span></td>         <td><span class="cr">+OK</span></td>                            <td><span class="cn2">Trim list to range; supports negative indices</span></td></tr>
-        <tr class="cmd-row show" data-cat="lists">  <td><span class="cn">LRANGE</span></td>    <td><span class="cs">LRANGE key start stop</span></td>        <td><span class="cr">*&lt;count&gt;\r\n...</span></td>            <td><span class="cn2">Get range of elements; supports negative indices</span></td></tr>
-        <tr class="cmd-row show" data-cat="hashes"> <td><span class="cn">HSET</span></td>      <td><span class="cs">HSET key field value</span></td>         <td><span class="cr">+OK</span></td>                            <td><span class="cn2">Add or update a field in a hash map</span></td></tr>
-        <tr class="cmd-row show" data-cat="hashes"> <td><span class="cn">HGET</span></td>      <td><span class="cs">HGET key field</span></td>               <td><span class="cr">$&lt;len&gt;\r\n&lt;val&gt; or $-1</span></td><td><span class="cn2">Get the value of a field</span></td></tr>
-        <tr class="cmd-row show" data-cat="hashes"> <td><span class="cn">HGETALL</span></td>   <td><span class="cs">HGETALL key</span></td>                  <td><span class="cr">*&lt;count&gt;\r\n...</span></td>            <td><span class="cn2">Retrieve all fields and values</span></td></tr>
-        <tr class="cmd-row show" data-cat="pubsub"> <td><span class="cn">PUBLISH</span></td>   <td><span class="cs">PUBLISH channel msg</span></td>          <td><span class="cr">:&lt;receivers&gt;</span></td>               <td><span class="cn2">Push message into broadcast channel</span></td></tr>
-        <tr class="cmd-row show" data-cat="pubsub"> <td><span class="cn">SUBSCRIBE</span></td> <td><span class="cs">SUBSCRIBE channel</span></td>            <td><span class="cr">*3\r\n...</span></td>                      <td><span class="cn2">Listen for broadcasts; blocks connection</span></td></tr>
-        <tr class="cmd-row show" data-cat="pubsub"> <td><span class="cn">UNSUBSCRIBE</span></td><td><span class="cs">UNSUBSCRIBE channel</span></td>         <td><span class="cr">*3\r\n...</span></td>                      <td><span class="cn2">End a subscription</span></td></tr>
+        <tr class="cmd-row show" data-cat="keys">   <td><span class="cn">PING</span></td>         <td><span class="cs">PING</span></td>                          <td><span class="cr">+PONG</span></td>                          <td><span class="cn2">Connection health check</span></td></tr>
+        <tr class="cmd-row show" data-cat="keys">   <td><span class="cn">SET</span></td>          <td><span class="cs">SET key value</span></td>                 <td><span class="cr">+OK</span></td>                            <td><span class="cn2">Write to shard + AOF</span></td></tr>
+        <tr class="cmd-row show" data-cat="keys">   <td><span class="cn">GET</span></td>          <td><span class="cs">GET key</span></td>                       <td><span class="cr">$&lt;len&gt;\r\n&lt;val&gt; or $-1</span></td><td><span class="cn2">Lazy expiry check on read</span></td></tr>
+        <tr class="cmd-row show" data-cat="keys">   <td><span class="cn">DEL</span></td>          <td><span class="cs">DEL key</span></td>                       <td><span class="cr">:1 or :0</span></td>                        <td><span class="cn2">Removes key from shard + AOF entry</span></td></tr>
+        <tr class="cmd-row show" data-cat="keys">   <td><span class="cn">EXISTS</span></td>       <td><span class="cs">EXISTS key</span></td>                    <td><span class="cr">:1 or :0</span></td>                        <td><span class="cn2">Read-only, acquires shard read guard</span></td></tr>
+        <tr class="cmd-row show" data-cat="keys">   <td><span class="cn">INCR</span></td>         <td><span class="cs">INCR key</span></td>                      <td><span class="cr">:&lt;new_value&gt; or -ERR</span></td>       <td><span class="cn2">Atomic increment within shard</span></td></tr>
+        <tr class="cmd-row show" data-cat="keys">   <td><span class="cn">SETEX</span></td>        <td><span class="cs">SETEX key seconds value</span></td>       <td><span class="cr">+OK</span></td>                            <td><span class="cn2">Write with TTL; expiry as SystemTime</span></td></tr>
+        <tr class="cmd-row show" data-cat="lists">  <td><span class="cn">LPUSH</span></td>        <td><span class="cs">LPUSH key value</span></td>               <td><span class="cr">:&lt;length&gt;</span></td>                  <td><span class="cn2">Push to head (VecDeque::push_front)</span></td></tr>
+        <tr class="cmd-row show" data-cat="lists">  <td><span class="cn">RPUSH</span></td>        <td><span class="cs">RPUSH key value</span></td>               <td><span class="cr">:&lt;length&gt;</span></td>                  <td><span class="cn2">Push to tail (VecDeque::push_back)</span></td></tr>
+        <tr class="cmd-row show" data-cat="lists">  <td><span class="cn">LPOP</span></td>         <td><span class="cs">LPOP key</span></td>                      <td><span class="cr">$&lt;len&gt;\r\n&lt;val&gt;</span></td>        <td><span class="cn2">Pop from head</span></td></tr>
+        <tr class="cmd-row show" data-cat="lists">  <td><span class="cn">RPOP</span></td>         <td><span class="cs">RPOP key</span></td>                      <td><span class="cr">$&lt;len&gt;\r\n&lt;val&gt;</span></td>        <td><span class="cn2">Pop from tail</span></td></tr>
+        <tr class="cmd-row show" data-cat="lists">  <td><span class="cn">RPOPLPUSH</span><span class="cmd-new">NEW</span></td><td><span class="cs">RPOPLPUSH src dest</span></td><td><span class="cr">$&lt;len&gt;\r\n&lt;val&gt; or $-1</span></td><td><span class="cn2">Atomic tail-pop → head-push; cross-shard safe</span></td></tr>
+        <tr class="cmd-row show" data-cat="lists">  <td><span class="cn">LREM</span><span class="cmd-new">NEW</span></td>     <td><span class="cs">LREM key count value</span></td>         <td><span class="cr">:1 or :0</span></td>                        <td><span class="cn2">Remove first matching element from list</span></td></tr>
+        <tr class="cmd-row show" data-cat="lists">  <td><span class="cn">LTRIM</span></td>        <td><span class="cs">LTRIM key start stop</span></td>          <td><span class="cr">+OK</span></td>                            <td><span class="cn2">Trim list to range; supports negative indices</span></td></tr>
+        <tr class="cmd-row show" data-cat="lists">  <td><span class="cn">LRANGE</span></td>       <td><span class="cs">LRANGE key start stop</span></td>         <td><span class="cr">*&lt;count&gt;\r\n...</span></td>            <td><span class="cn2">Get range of elements; supports negative indices</span></td></tr>
+        <tr class="cmd-row show" data-cat="hashes"> <td><span class="cn">HSET</span></td>         <td><span class="cs">HSET key field value</span></td>          <td><span class="cr">+OK</span></td>                            <td><span class="cn2">Add or update a field in a hash</span></td></tr>
+        <tr class="cmd-row show" data-cat="hashes"> <td><span class="cn">HGET</span></td>         <td><span class="cs">HGET key field</span></td>                <td><span class="cr">$&lt;len&gt;\r\n&lt;val&gt; or $-1</span></td><td><span class="cn2">Get the value of a field</span></td></tr>
+        <tr class="cmd-row show" data-cat="hashes"> <td><span class="cn">HGETALL</span></td>      <td><span class="cs">HGETALL key</span></td>                   <td><span class="cr">*&lt;count&gt;\r\n...</span></td>            <td><span class="cn2">Retrieve all fields and values</span></td></tr>
+        <tr class="cmd-row show" data-cat="pubsub"> <td><span class="cn">PUBLISH</span></td>      <td><span class="cs">PUBLISH channel msg</span></td>           <td><span class="cr">:&lt;receivers&gt;</span></td>               <td><span class="cn2">Push message into broadcast channel</span></td></tr>
+        <tr class="cmd-row show" data-cat="pubsub"> <td><span class="cn">SUBSCRIBE</span></td>    <td><span class="cs">SUBSCRIBE channel</span></td>             <td><span class="cr">*3\r\n...</span></td>                      <td><span class="cn2">Listen for broadcasts; blocks connection</span></td></tr>
+        <tr class="cmd-row show" data-cat="pubsub"> <td><span class="cn">UNSUBSCRIBE</span></td>  <td><span class="cs">UNSUBSCRIBE channel</span></td>           <td><span class="cr">*3\r\n...</span></td>                      <td><span class="cn2">End a subscription</span></td></tr>
       </tbody>
     </table>
   </div>
@@ -639,25 +796,25 @@ footer span { color: var(--rust); }
      PERSISTENCE
 ══════════════════════════════════════ -->
 <section id="persistence" class="fi">
-  <div class="sec-num">05 / Durability</div>
+  <div class="sec-num">06 / Durability</div>
   <h2 class="sec-title">Persistence: The AOF Model</h2>
-  <p class="sec-sub">Titan KV uses an Append-Only File for persistence — the same model Redis uses in <code>appendonly yes</code> mode.</p>
+  <p class="sec-sub">Titan KV uses an Append-Only File for persistence — the same model Redis uses in <code>appendonly yes</code> mode. Compaction now scans all 64 shards to build the minimal log.</p>
 
   <div class="grid" style="margin-bottom:28px;">
     <div class="card">
       <div class="card-icon ic-r">✍️</div>
       <div class="card-title">On Every Write</div>
-      <div class="card-body">Every mutating command is serialized to <code>database.aof</code> before the response is sent. If the process dies at any moment, the on-disk log is authoritative. No data is lost that was acknowledged.</div>
+      <div class="card-body">Every mutating command — including <code>RPOPLPUSH</code> and <code>LREM</code> — is serialized to <code>database.aof</code> before the response is sent. If the process dies at any moment, the on-disk log is authoritative.</div>
     </div>
     <div class="card">
       <div class="card-icon ic-c">▶️</div>
       <div class="card-title">On Startup (Replay)</div>
-      <div class="card-body">The AOF is replayed top-to-bottom. The in-memory state is deterministically reconstructed from the command log. No binary snapshot to corrupt, no partial-write ambiguity. The database is live in milliseconds.</div>
+      <div class="card-body">The AOF is replayed top-to-bottom. Each command is re-executed against the sharded engine — routing every key to its correct shard. In-memory state is deterministically reconstructed in milliseconds.</div>
     </div>
     <div class="card">
       <div class="card-icon ic-g">♻️</div>
       <div class="card-title">Every 60s (Compaction)</div>
-      <div class="card-body">The compaction task serializes current live state to <code>database.temp.aof</code> and atomically renames it over the live log. A crash mid-compaction never corrupts the live file. Redundant history collapses: 1000 SETs on the same key become one.</div>
+      <div class="card-body">The compaction task iterates all 64 shards, serializes only the current live state to <code>database.temp.aof</code>, and atomically renames it over the live log. A crash mid-compaction never corrupts the live file.</div>
     </div>
   </div>
 
@@ -684,18 +841,18 @@ footer span { color: var(--rust); }
      EXPIRATION
 ══════════════════════════════════════ -->
 <section id="expiration" class="fi">
-  <div class="sec-num">06 / Lifecycle</div>
+  <div class="sec-num">07 / Lifecycle</div>
   <h2 class="sec-title">Expiration: Two Strategies in Tandem</h2>
-  <p class="sec-sub">Titan KV implements the same dual-expiry pattern Redis uses. Neither strategy alone is sufficient; together they guarantee no key outlives its TTL.</p>
+  <p class="sec-sub">Titan KV implements the same dual-expiry pattern Redis uses. Neither strategy alone is sufficient; together they guarantee no key outlives its TTL — even across 64 shards.</p>
 
   <div class="expiry-grid" style="margin-bottom:24px;">
     <div class="exp-card">
       <div class="exp-title">Lazy Expiration <span class="exp-tag tg-lazy">ON READ</span></div>
-      <div class="exp-body">When <code>GET</code> is called, the handler checks <code>expires_at</code> against <code>SystemTime::now()</code>. If stale: key deleted, <code>DEL</code> appended to AOF, <code>$-1</code> returned. Zero overhead for non-expiring keys; no background task required for this path.</div>
+      <div class="exp-body">When <code>GET</code> is called, the handler checks <code>expires_at</code> against <code>SystemTime::now()</code>. If stale: key deleted from its shard, <code>DEL</code> appended to AOF, <code>$-1</code> returned. Zero overhead for non-expiring keys.</div>
     </div>
     <div class="exp-card">
       <div class="exp-title">Active Expiration <span class="exp-tag tg-active">BACKGROUND</span></div>
-      <div class="exp-body">A sweeper wakes every <strong style="color:var(--cyan)">10 seconds</strong>, acquires a write lock, collects all expired keys, removes them in batch, and flushes <code>DEL</code> entries to the AOF. Prevents unread keys from living forever in memory, bounding worst-case memory usage.</div>
+      <div class="exp-body">A sweeper wakes every <strong style="color:var(--cyan)">10 seconds</strong>, iterates across all <strong style="color:var(--cyan)">64 shards</strong> in sequence, collects expired keys per shard, removes them in batch, and flushes <code>DEL</code> entries to the AOF. Prevents unread keys from accumulating in memory.</div>
     </div>
   </div>
 
@@ -710,8 +867,65 @@ footer span { color: var(--rust); }
       <div><span class="tk"># t+31s — lazy expiry fires on GET</span></div>
       <div><span class="tp">$</span> <span class="tc">redis-cli GET session:abc</span></div>
       <div><span class="to">(nil)</span></div><br>
-      <div><span class="tk"># alternatively — sweeper at t+10s tick evicts any unread expired keys</span></div>
+      <div><span class="tk"># alternatively — sweeper at t+10s tick evicts across all 64 shards</span></div>
       <div><span class="to">[DBUG] [Sweeper] Active Expiration Swept key: session:abc</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════
+     JOB QUEUE
+══════════════════════════════════════ -->
+<section id="jobqueue" class="fi">
+  <div class="sec-num">08 / Patterns</div>
+  <h2 class="sec-title">Job Queue Pattern</h2>
+  <p class="sec-sub">
+    <code>RPOPLPUSH</code> enables a reliable, Redis-style job queue. Because the operation is atomic —
+    even when source and destination hash to different shards — a job is never lost between the pop and the push.
+  </p>
+
+  <div class="queue-flow">
+    <div class="q-box pending">
+      <div class="q-box-title">jobs:pending</div>
+      <div class="q-box-body">RPUSH "task:1"<br>RPUSH "task:2"<br>RPUSH "task:3"<br>[ tail → ]</div>
+    </div>
+    <div class="q-arrow">
+      →
+      <span class="q-arrow-lbl">RPOPLPUSH<br>(atomic)</span>
+    </div>
+    <div class="q-box processing">
+      <div class="q-box-title">jobs:processing</div>
+      <div class="q-box-body">In-flight registry<br>"task:1" taken<br>survives crashes<br>[ ← head ]</div>
+    </div>
+    <div class="q-arrow">
+      →
+      <span class="q-arrow-lbl">LREM on<br>success</span>
+    </div>
+    <div class="q-box done">
+      <div class="q-box-title">Completed</div>
+      <div class="q-box-body">Remove from<br>processing list<br>LREM jobs:processing<br>1 "task:1"</div>
+    </div>
+  </div>
+
+  <div class="term">
+    <div class="term-head"><div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div><div class="term-ttl">reliable job queue</div></div>
+    <div class="term-body">
+      <div><span class="tk"># Producer — enqueue jobs</span></div>
+      <div><span class="tp">$</span> <span class="tc">redis-cli RPUSH jobs:pending "task:1"</span></div>
+      <div><span class="tn">(integer) 1</span></div>
+      <div><span class="tp">$</span> <span class="tc">redis-cli RPUSH jobs:pending "task:2"</span></div>
+      <div><span class="tn">(integer) 2</span></div><br>
+      <div><span class="tk"># Worker — atomically move job: pending → processing</span></div>
+      <div><span class="tp">$</span> <span class="tc">redis-cli RPOPLPUSH jobs:pending jobs:processing</span></div>
+      <div><span class="ts">"task:1"</span></div><br>
+      <div><span class="tk"># Worker processes task:1 …</span></div>
+      <div><span class="tk"># On success — acknowledge completion</span></div>
+      <div><span class="tp">$</span> <span class="tc">redis-cli LREM jobs:processing 1 "task:1"</span></div>
+      <div><span class="tn">(integer) 1</span></div><br>
+      <div><span class="tk"># On crash — task:1 stays in jobs:processing (in-flight registry)</span></div>
+      <div><span class="tk"># Recovery — requeue the orphaned job</span></div>
+      <div><span class="tp">$</span> <span class="tc">redis-cli RPOPLPUSH jobs:processing jobs:pending</span></div>
+      <div><span class="ts">"task:1"</span></div>
     </div>
   </div>
 </section>
@@ -720,7 +934,7 @@ footer span { color: var(--rust); }
      GETTING STARTED
 ══════════════════════════════════════ -->
 <section id="start" class="fi">
-  <div class="sec-num">07 / Usage</div>
+  <div class="sec-num">09 / Usage</div>
   <h2 class="sec-title">Getting Started</h2>
   <p class="sec-sub">Prerequisites: Rust toolchain (edition 2024), Cargo. No external services required.</p>
 
@@ -748,13 +962,13 @@ footer span { color: var(--rust); }
       <div><span class="tg">OK</span></div>
       <div><span class="tp">$</span> <span class="tc">redis-cli -p 6379 INCR visits</span></div>
       <div><span class="tn">(integer) 1</span></div><br>
-      <div><span class="tk"># Lists</span></div>
-      <div><span class="tp">$</span> <span class="tc">redis-cli -p 6379 LPUSH queue "job1"</span></div>
+      <div><span class="tk"># Lists &amp; Job Queue</span></div>
+      <div><span class="tp">$</span> <span class="tc">redis-cli -p 6379 RPUSH queue "job1"</span></div>
       <div><span class="tn">(integer) 1</span></div>
-      <div><span class="tp">$</span> <span class="tc">redis-cli -p 6379 RPUSH queue "job2"</span></div>
-      <div><span class="tn">(integer) 2</span></div>
-      <div><span class="tp">$</span> <span class="tc">redis-cli -p 6379 LRANGE queue 0 -1</span></div>
-      <div><span class="ts">1) "job1"<br>2) "job2"</span></div><br>
+      <div><span class="tp">$</span> <span class="tc">redis-cli -p 6379 RPOPLPUSH queue processing</span></div>
+      <div><span class="ts">"job1"</span></div>
+      <div><span class="tp">$</span> <span class="tc">redis-cli -p 6379 LREM processing 1 "job1"</span></div>
+      <div><span class="tn">(integer) 1</span></div><br>
       <div><span class="tk"># Hashes</span></div>
       <div><span class="tp">$</span> <span class="tc">redis-cli -p 6379 HSET user:1 name "Alice"</span></div>
       <div><span class="tg">OK</span></div>
@@ -779,7 +993,7 @@ footer span { color: var(--rust); }
      DOCKER
 ══════════════════════════════════════ -->
 <section id="docker" class="fi">
-  <div class="sec-num">08 / Deployment</div>
+  <div class="sec-num">10 / Deployment</div>
   <h2 class="sec-title">Docker</h2>
   <p class="sec-sub">Titan KV ships with a multi-stage Dockerfile. The build stage compiles the Rust binary; the runtime stage is a minimal Debian image containing only the compiled binary.</p>
 
@@ -809,24 +1023,34 @@ footer span { color: var(--rust); }
      CONCURRENCY
 ══════════════════════════════════════ -->
 <section id="concurrency" class="fi">
-  <div class="sec-num">09 / Concurrency</div>
+  <div class="sec-num">11 / Concurrency</div>
   <h2 class="sec-title">Concurrency Model</h2>
-  <p class="sec-sub">Every client connection is an independent Tokio task. The shared state is a single <code>Arc&lt;RwLock&lt;...&gt;&gt;</code> — no per-shard locks, no lock-free tricks yet.</p>
+  <p class="sec-sub">
+    Every client connection is an independent Tokio task. The shared state is a <code>ShardedDb</code> — an array of
+    64 independent <code>RwLock</code> shards. Key distribution across shards is automatic and deterministic.
+  </p>
 
-  <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(250px,1fr));margin-bottom:24px;">
-    <div class="card">
-      <div class="card-icon ic-g">👁</div>
-      <div class="card-title">N Concurrent Readers</div>
-      <div class="card-body"><code>GET</code>, <code>EXISTS</code>, <code>HGET</code>, <code>HGETALL</code>, <code>LRANGE</code> acquire a read guard that does not block other reads. Unlimited concurrent read throughput under read-heavy workloads.</div>
+  <div class="concurrency-grid">
+    <div class="conc-card">
+      <div class="conc-num">∞</div>
+      <div class="conc-lbl">Concurrent Readers / Shard</div>
+      <div class="conc-body"><code>GET</code>, <code>EXISTS</code>, <code>LRANGE</code>, <code>HGET</code>, <code>HGETALL</code> acquire a shard read guard. Reads on the same shard don't block each other. Reads on different shards are completely independent.</div>
     </div>
-    <div class="card">
-      <div class="card-icon ic-r">✏️</div>
-      <div class="card-title">1 Exclusive Writer</div>
-      <div class="card-body"><code>SET</code>, <code>DEL</code>, <code>INCR</code>, <code>SETEX</code>, <code>LPUSH</code>, <code>RPUSH</code>, <code>LPOP</code>, <code>RPOP</code>, <code>LTRIM</code>, <code>HSET</code> acquire a write guard that waits for all readers to finish, then serializes.</div>
+    <div class="conc-card">
+      <div class="conc-num">64</div>
+      <div class="conc-lbl">Max Concurrent Writers</div>
+      <div class="conc-body"><code>SET</code>, <code>DEL</code>, <code>INCR</code>, <code>LPUSH</code>, <code>RPUSH</code>, etc. lock exactly one shard. Writes to different shards proceed in parallel with zero contention — up to 64 simultaneous writers.</div>
+    </div>
+    <div class="conc-card">
+      <div class="conc-num">⬡</div>
+      <div class="conc-lbl">Cross-Shard Atomicity</div>
+      <div class="conc-body"><code>RPOPLPUSH</code> may span two shards. <code>write_multi_shards()</code> acquires both write guards in ascending index order (lower index first), making deadlock structurally impossible — not just unlikely.</div>
     </div>
   </div>
+
   <p style="font-size:13px;color:var(--muted);max-width:680px;line-height:1.8;">
-    This is correct, safe, and sufficient. It is also the natural starting point for future optimization: the bottleneck under high write contention is the single global lock — which is exactly what sharded hashmaps and lock-free structures address.
+    Under a workload with a uniform key distribution, write throughput scales linearly until hitting I/O or CPU limits
+    — not the lock. The single global lock bottleneck is gone. The next tuning target is AOF fsync latency.
   </p>
 </section>
 
@@ -834,7 +1058,7 @@ footer span { color: var(--rust); }
      SAFETY
 ══════════════════════════════════════ -->
 <section id="safety" class="fi">
-  <div class="sec-num">10 / Safety</div>
+  <div class="sec-num">12 / Safety</div>
   <h2 class="sec-title">Memory Safety</h2>
   <p class="sec-sub">Titan KV contains zero <code>unsafe</code> blocks. The Rust compiler's ownership model provides compile-time guarantees that a GC language cannot.</p>
 
@@ -843,8 +1067,8 @@ footer span { color: var(--rust); }
     <div class="safe-item"><div class="safe-chk">✓</div><div class="safe-txt"><strong>No Use-After-Free</strong>Ownership transfer, not raw pointers</div></div>
     <div class="safe-item"><div class="safe-chk">✓</div><div class="safe-txt"><strong>No Buffer Overflows</strong>Type-level read bounds enforcement</div></div>
     <div class="safe-item"><div class="safe-chk">✓</div><div class="safe-txt"><strong>No Null Dereferences</strong><code>Option&lt;T&gt;</code> instead of null everywhere</div></div>
+    <div class="safe-item"><div class="safe-chk">✓</div><div class="safe-txt"><strong>No Deadlocks</strong>Ordered lock acquisition — structural guarantee, not runtime check</div></div>
     <div class="safe-item"><div class="safe-chk">✓</div><div class="safe-txt"><strong>Crash-Safe AOF</strong>Atomic <code>rename(temp → live)</code>, never truncate-in-place</div></div>
-    <div class="safe-item"><div class="safe-chk">✓</div><div class="safe-txt"><strong>Zero unsafe Blocks</strong>Fully verified by the Rust compiler</div></div>
   </div>
 </section>
 
@@ -852,16 +1076,29 @@ footer span { color: var(--rust); }
      ROADMAP
 ══════════════════════════════════════ -->
 <section id="roadmap" class="fi">
-  <div class="sec-num">11 / Future</div>
+  <div class="sec-num">13 / Future</div>
   <h2 class="sec-title">What's Next</h2>
   <p class="sec-sub">The next major milestones, each targeting a distinct dimension of what makes a production-grade data store.</p>
 
   <div class="roadmap">
     <div class="rm-item">
+      <div class="rm-dot done">✓</div>
+      <div class="rm-body">
+        <div class="rm-title" style="color:var(--green);">64-Shard Engine — Shipped</div>
+        <div class="rm-desc">The global <code>RwLock</code> was replaced with a <code>ShardedDb</code> of 64 independent shards. Keys are hash-routed to their shard. Cross-shard operations (<code>RPOPLPUSH</code>) use ordered lock acquisition to prevent deadlock. Job queue primitives <code>RPOPLPUSH</code> and <code>LREM</code> added.</div>
+        <div class="rm-tags">
+          <span class="rm-tag done-tag">ShardedDb</span>
+          <span class="rm-tag done-tag">RPOPLPUSH</span>
+          <span class="rm-tag done-tag">LREM</span>
+          <span class="rm-tag done-tag">deadlock-free</span>
+        </div>
+      </div>
+    </div>
+    <div class="rm-item">
       <div class="rm-dot">🔥</div>
       <div class="rm-body">
         <div class="rm-title">The Stress Test — Benchmarking</div>
-        <div class="rm-desc">A dedicated benchmarking branch using <code>redis-benchmark</code> to blast the server with 100,000+ requests. Goal: establish a baseline, identify the actual bottleneck (global lock? AOF fsync? Tokio scheduler?), and document throughput under realistic concurrent load.</div>
+        <div class="rm-desc">A dedicated benchmarking branch using <code>redis-benchmark</code> to blast the server with 100,000+ requests. With the global lock removed, the expected bottleneck is AOF fsync or Tokio scheduling — the goal is to measure which and document throughput under realistic concurrent load.</div>
         <div class="rm-tags"><span class="rm-tag">redis-benchmark</span><span class="rm-tag">throughput</span><span class="rm-tag">profiling</span><span class="rm-tag">flamegraph</span></div>
       </div>
     </div>
@@ -869,7 +1106,7 @@ footer span { color: var(--rust); }
       <div class="rm-dot">🗂</div>
       <div class="rm-body">
         <div class="rm-title">Advanced Data Structures</div>
-        <div class="rm-desc">With String, List, and HashMap already implemented, the engine's enum model could encompass <strong style="color:var(--text)">Sets</strong> (<code>SADD</code>, <code>SREM</code>, <code>SMEMBERS</code> backed by <code>HashSet&lt;String&gt;</code>) and <strong style="color:var(--text)">Sorted Sets</strong> (<code>ZADD</code>, <code>ZRANGE</code>, <code>ZSCORE</code> for leaderboard-like operations).</div>
+        <div class="rm-desc">With String, List, and Hash already implemented, the engine's enum model could expand to <strong style="color:var(--text)">Sets</strong> (<code>SADD</code>, <code>SREM</code>, <code>SMEMBERS</code> backed by <code>HashSet&lt;String&gt;</code>) and <strong style="color:var(--text)">Sorted Sets</strong> (<code>ZADD</code>, <code>ZRANGE</code>, <code>ZSCORE</code> for leaderboard-like operations).</div>
         <div class="rm-tags"><span class="rm-tag">Sets</span><span class="rm-tag">Sorted Sets</span><span class="rm-tag">HashSet</span><span class="rm-tag">BTreeMap</span></div>
       </div>
     </div>
@@ -888,7 +1125,7 @@ footer span { color: var(--rust); }
      PROJECT LAYOUT
 ══════════════════════════════════════ -->
 <section id="layout" class="fi">
-  <div class="sec-num">12 / Structure</div>
+  <div class="sec-num">14 / Structure</div>
   <h2 class="sec-title">Project Layout</h2>
 
   <div class="ftree">
@@ -896,8 +1133,8 @@ footer span { color: var(--rust); }
     <div class="ftree-row">├── <span class="ftree-dir">src/</span></div>
     <div class="ftree-row">│   ├── <span class="ftree-file">main.rs</span>          <span class="ftree-cmt"># Startup: AOF replay, background tasks, server launch</span></div>
     <div class="ftree-row">│   ├── <span class="ftree-file">server.rs</span>        <span class="ftree-cmt"># TCP listener, per-connection async handler</span></div>
-    <div class="ftree-row">│   ├── <span class="ftree-file">protocol.rs</span>      <span class="ftree-cmt"># RESP parser → typed Command enum</span></div>
-    <div class="ftree-row">│   ├── <span class="ftree-file">engine.rs</span>        <span class="ftree-cmt"># Core DB type: Arc&lt;RwLock&lt;HashMap&lt;String, Entry&gt;&gt;&gt;</span></div>
+    <div class="ftree-row">│   ├── <span class="ftree-file">protocol.rs</span>      <span class="ftree-cmt"># RESP parser → typed Command enum (incl. RPOPLPUSH, LREM)</span></div>
+    <div class="ftree-row">│   ├── <span class="ftree-file">engine.rs</span>        <span class="ftree-cmt"># ShardedDb: Arc&lt;[RwLock&lt;HashMap&lt;String, Entry&gt;&gt;; 64]&gt;</span></div>
     <div class="ftree-row">│   ├── <span class="ftree-file">logger.rs</span>        <span class="ftree-cmt"># Color-coded terminal monitoring macros</span></div>
     <div class="ftree-row">│   ├── <span class="ftree-file">pubsub.rs</span>        <span class="ftree-cmt"># Broadcast broker: subscription channel management</span></div>
     <div class="ftree-row">│   └── <span class="ftree-file">thread_pool.rs</span>   <span class="ftree-cmt"># Hand-rolled OS thread pool (graceful shutdown)</span></div>
@@ -915,7 +1152,7 @@ footer span { color: var(--rust); }
 
 <footer>
   <div style="margin-bottom:6px;">Built in <span>Rust</span>. Built to learn. Built to last.</div>
-  <div>Titan KV &nbsp;·&nbsp; v0.1.0 &nbsp;·&nbsp; Redis-compatible KV Store</div>
+  <div>Titan KV &nbsp;·&nbsp; v0.2.0 &nbsp;·&nbsp; 64-Shard Redis-compatible KV Store</div>
 </footer>
 
 </div><!-- /wrap -->
@@ -932,33 +1169,22 @@ window.addEventListener('scroll', () => {
 // Active nav link
 const secs = document.querySelectorAll('section[id]');
 const links = document.querySelectorAll('.sb-link');
-new IntersectionObserver(entries => {
-  entries.forEach(e => {
-    if (e.isIntersecting) {
-      links.forEach(l => {
-        l.classList.toggle('on', l.getAttribute('href') === '#' + e.target.id);
-      });
-    }
-  });
-}, { threshold: 0.25, rootMargin: '-10% 0px -65% 0px' }).observe
-  ? secs.forEach(s => new IntersectionObserver(entries => {
-      entries.forEach(e => {
-        if (e.isIntersecting) {
-          links.forEach(l => l.classList.toggle('on', l.getAttribute('href') === '#' + e.target.id));
-        }
-      });
-    }, { threshold: 0.2, rootMargin: '-8% 0px -60% 0px' }).observe(s))
-  : null;
+secs.forEach(sec => {
+  new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        links.forEach(l => l.classList.toggle('on', l.getAttribute('href') === '#' + e.target.id));
+      }
+    });
+  }, { threshold: 0.2, rootMargin: '-8% 0px -60% 0px' }).observe(sec);
+});
 
 // Fade-in on scroll
-new IntersectionObserver(entries => {
-  entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('vis'); });
-}, { threshold: 0.08 }).observe
-  ? document.querySelectorAll('.fi').forEach(el =>
-      new IntersectionObserver(entries => {
-        entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('vis'); });
-      }, { threshold: 0.08 }).observe(el))
-  : null;
+document.querySelectorAll('.fi').forEach(el => {
+  new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('vis'); });
+  }, { threshold: 0.08 }).observe(el);
+});
 
 // Mobile toggle
 document.getElementById('mob').addEventListener('click', () =>
@@ -978,6 +1204,28 @@ document.querySelectorAll('.cmd-tab').forEach(tab => {
   });
 });
 
+// Shard visualizer
+const shardVis = document.getElementById('shardVis');
+for (let i = 0; i < 64; i++) {
+  const d = document.createElement('div');
+  d.className = 'shard-block';
+  d.title = `Shard ${i}`;
+  d.textContent = i;
+  d.addEventListener('mouseenter', () => d.classList.add('active'));
+  d.addEventListener('mouseleave', () => d.classList.remove('active'));
+  shardVis.appendChild(d);
+}
+
+// Animate a few shards to show "activity"
+const shardBlocks = shardVis.querySelectorAll('.shard-block');
+function pulseRandomShard() {
+  const idx = Math.floor(Math.random() * 64);
+  shardBlocks[idx].classList.add('active');
+  setTimeout(() => shardBlocks[idx].classList.remove('active'), 400);
+  setTimeout(pulseRandomShard, 180 + Math.random() * 320);
+}
+pulseRandomShard();
+
 // AOF Simulator
 const aofBtn  = document.getElementById('aofBtn');
 const aofCmds = document.getElementById('aofCmds');
@@ -985,15 +1233,19 @@ const aofFile = document.getElementById('aofFile');
 let simBusy = false;
 
 const steps = [
-  { cmd: 'SET username alice',    aof: 'SET username alice',    ms: 0   },
-  { cmd: 'SET username bob',      aof: 'SET username bob',      ms: 750 },
-  { cmd: 'INCR visits',           aof: 'INCR visits',           ms: 1500 },
-  { cmd: 'SET username charlie',  aof: 'SET username charlie',  ms: 2200 },
-  { cmd: 'INCR visits',           aof: 'INCR visits',           ms: 2900 },
-  { cmd: 'SET token "abc123"',    aof: 'SET token "abc123"',    ms: 3600 },
-  { cmd: '⏱  [60s] Compaction fires…', aof: null, ms: 4600, compact: true },
+  { cmd: 'SET username alice',          aof: 'SET username alice',          ms: 0    },
+  { cmd: 'RPUSH jobs:pending "task:1"', aof: 'RPUSH jobs:pending "task:1"', ms: 700  },
+  { cmd: 'RPUSH jobs:pending "task:2"', aof: 'RPUSH jobs:pending "task:2"', ms: 1400 },
+  { cmd: 'RPOPLPUSH jobs:pending jobs:processing', aof: 'RPOPLPUSH jobs:pending jobs:processing', ms: 2100 },
+  { cmd: 'INCR visits',                 aof: 'INCR visits',                 ms: 2800 },
+  { cmd: 'LREM jobs:processing 1 "task:1"', aof: 'LREM jobs:processing 1 "task:1"', ms: 3500 },
+  { cmd: '⏱  [60s] Compaction fires…', aof: null, ms: 4400, compact: true },
 ];
-const compacted = ['SET username charlie', 'SET visits 2', 'SET token "abc123"'];
+const compacted = [
+  'SET username alice',
+  'RPUSH jobs:pending "task:2"',
+  'SET visits 1',
+];
 
 function addLine(container, text, cls) {
   const d = document.createElement('div');
@@ -1019,7 +1271,7 @@ aofBtn.addEventListener('click', () => {
         setTimeout(() => {
           aofFile.innerHTML = '';
           compacted.forEach(l => addLine(aofFile, l, 'compact'));
-          addLine(aofFile, '✓ Compacted: 6 lines → 3', '');
+          addLine(aofFile, `✓ Compacted: ${steps.length - 1} lines → ${compacted.length}`, '');
           aofFile.lastChild.style.color = 'var(--green)';
           aofBtn.disabled = false;
           aofBtn.textContent = '↺ Again';
