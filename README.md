@@ -13,6 +13,7 @@
 
 [![Rust](https://img.shields.io/badge/Rust-2024_Edition-orange?style=flat-square&logo=rust)](https://www.rust-lang.org/)
 [![Tokio](https://img.shields.io/badge/Async-Tokio-purple?style=flat-square)](https://tokio.rs/)
+[![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?style=flat-square&logo=docker&logoColor=white)](Dockerfile)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](LICENSE)
 [![Status](https://img.shields.io/badge/Status-Active_Development-brightgreen?style=flat-square)]()
 
@@ -231,6 +232,30 @@ echo -e "GET name\n" | nc 127.0.0.1 6379
 
 ---
 
+## Docker
+
+Titan KV ships with a multi-stage `Dockerfile`. The build stage compiles the release binary inside `rust:1.81-slim-bookworm`; the runtime stage copies only the resulting binary into a minimal `debian:bookworm-slim` image — no Rust toolchain, no source code, no intermediate artifacts.
+
+```bash
+# Build the image
+docker build -t titan_kv .
+
+# Run — maps the standard Redis port
+docker run -p 6379:6379 titan_kv
+
+# Run with a persistent AOF volume so data survives container restarts
+docker run -p 6379:6379 -v $(pwd)/data:/app titan_kv
+```
+
+Connect from the host exactly as you would with a local instance:
+
+```bash
+redis-cli -p 6379 PING
+# → PONG
+```
+
+---
+
 ## Concurrency Model
 
 Every client connection is an independent Tokio task. The shared state is a single `Arc<RwLock<...>>` — no per-shard locks, no sharding, no lock-free tricks yet. The Tokio `RwLock` allows:
@@ -312,6 +337,7 @@ titan_kv/
 │   ├── logger.rs        # Advanced color-coded terminal monitoring macros
 │   ├── pubsub.rs        # Broadcast broker logic managing subscription channels
 │   └── thread_pool.rs   # Hand-rolled OS thread pool (graceful shutdown)
+├── Dockerfile           # Multi-stage build: rust:1.81-slim → debian:bookworm-slim
 ├── database.aof         # Append-only log (created on first write)
 └── Cargo.toml
 ```
