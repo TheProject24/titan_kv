@@ -26,7 +26,7 @@ async fn append_aof(log: String) {
     }
 }
 
-use crate::engine::{ Db, Entry };
+use crate::engine::{ self, Db, Entry, MultiWriteGuard };
 use crate::protocol::{ parse_command, Command, read_resp };
 // use crate::thread_pool::ThreadPool;
 
@@ -61,7 +61,7 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                             expires_at: Some(expiration_time),
                         };
 
-                        let mut map = db.write().await;
+                        let mut map = db.write_shard(&key).await;
                         map.insert(key.clone(), new_entry);
 
                         let log = format!("SETEX {} {} {}\n", key, seconds, value);
@@ -72,20 +72,27 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                         let _ = stream.write_all(b"+PONG\r\n").await;
                     }
             Command::Set(key, value) => {
-                        let mut map = db.write().await;
-                        let new_entry = Entry {
-                            value: crate::engine::DataType::String(value.clone()),
-                            expires_at: None,
-                        };
-                        map.insert(key.clone(), new_entry);
+                        let mut shard = db.write_shard(&key).await;
 
-                        let log = format!("SET {} {}\n", key, value);
-                        append_aof(log).await;
+                        shard.insert(key, Entry {
+                            value: engine::DataType::String(value),
+                            expires_at: None,
+                        });
 
                         let _ = stream.write_all(b"+OK\r\n").await;
+                        // let new_entry = Entry {
+                        //     value: crate::engine::DataType::String(value.clone()),
+                        //     expires_at: None,
+                        // };
+                        // map.insert(key.clone(), new_entry);
+
+                        // let log = format!("SET {} {}\n", key, value);
+                        // append_aof(log).await;
+
+                        // let _ = stream.write_all(b"+OK\r\n").await;
                     }
             Command::Get(key) => {
-                        let mut map = db.write().await;
+                        let mut map = db.write_shard(&key).await;
 
                         match map.get(&key) {
                             Some(entry) => {
@@ -119,7 +126,7 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                         }
                     }
             Command::Del(key) => {
-                        let mut map = db.write().await;
+                        let mut map = db.write_shard(&key).await;
                         let not_there = map.remove(&key).is_some();
 
                         if not_there {
@@ -131,7 +138,7 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                         }
                     }
             Command::Exists(key) => {
-                        let map = db.read().await;
+                        let map = db.read_shard(&key).await;
 
                         let key_exists = map.contains_key(&key);
 
@@ -142,7 +149,7 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                         }
                     }
             Command::Incr(key) => {
-                        let mut map = db.write().await;
+                        let mut map = db.write_shard(&key).await;
                         let current_number = match map.get(&key) {
                             Some(entry) => {
                                 match &entry.value {
@@ -211,7 +218,7 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                         let _ = stream.write_all(ack.as_bytes()).await;
                     }
             Command::LPush(key, value) => {
-                        let mut map = db.write().await;
+                        let mut map = db.write_shard(&key).await;
 
                         let entry = map.entry(key.clone()).or_insert_with(|| Entry {
                             value: crate::engine::DataType::List(std::collections::VecDeque::new()),
@@ -237,7 +244,7 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                         }
                     }
             Command::LPop(key) => {
-                        let mut map = db.write().await;
+                        let mut map = db.write_shard(&key).await;
 
                         if let Some(entry) = map.get_mut(&key) {
                             match &mut entry.value {
@@ -263,7 +270,7 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                         }
                     }
             Command::RPop(key) => {
-                        let mut map = db.write().await;
+                        let mut map = db.write_shard(&key).await;
 
                         if let Some(entry) = map.get_mut(&key) {
                             match &mut entry.value {
@@ -289,7 +296,7 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                         }
                     }
             Command::LTrim(key, start, stop) => {
-                        let mut map = db.write().await;
+                        let mut map = db.write_shard(&key).await;
                     
                         if let Some(entry) = map.get_mut(&key) {
                             match &mut entry.value {
@@ -333,7 +340,7 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                         }
                     }
             Command::LRange(key, start, stop) => {
-                        let map = db.read().await;
+                        let map = db.read_shard(&key).await;
 
                         if let Some(entry) = map.get(&key) {
                             match &entry.value {
@@ -369,7 +376,7 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                         }
                     }
             Command::RPush(key, value) => {
-                        let mut map = db.write().await;
+                        let mut map = db.write_shard(&key).await;
                         let entry = map.entry(key.clone()).or_insert_with(|| Entry {
                             value: crate::engine::DataType::List(std::collections::VecDeque::new()),
                             expires_at: None,
@@ -387,12 +394,12 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                         }
                     }
             Command::HSet(key, field, value) => {
-                        let mut map = db.write().await;
+                        let mut map = db.write_shard(&key).await;
                         let entry = map.entry(key.clone()).or_insert_with(|| Entry {
-                            value: crate::engine::DataType::HashMap(std::collections::HashMap::new()),
+                            value: crate::engine::DataType::Hash(std::collections::HashMap::new()),
                             expires_at: None,
                         });
-                        if let crate::engine::DataType::HashMap(hmap) = &mut entry.value {
+                        if let crate::engine::DataType::Hash(hmap) = &mut entry.value {
                             hmap.insert(field.clone(), value.clone());
                             let log = format!("HSET {} {} \"{}\"\n", key, field, value);
                             append_aof(log).await;
@@ -404,9 +411,9 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                         }
                     }
             Command::HGetAll(key) => {
-                        let map = db.read().await;
+                        let map = db.read_shard(&key).await;
                         if let Some(entry) = map.get(&key) {
-                            if let crate::engine::DataType::HashMap(hmap) = &entry.value {
+                            if let crate::engine::DataType::Hash(hmap) = &entry.value {
                                 let mut response = format!("*{}\r\n", hmap.len() * 2);
                                 for (f, v) in hmap {
                                     response.push_str(&format!("${}\r\n{}\r\n${}\r\n{}\r\n", f.len(), f, v.len(), v));
@@ -420,9 +427,9 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                         }
                     }
             Command::HGet(key, field) => {
-                        let map = db.read().await;
+                        let map = db.read_shard(&key).await;
                         if let Some(entry) = map.get(&key) {
-                            if let crate::engine::DataType::HashMap(hmap) = &entry.value {
+                            if let crate::engine::DataType::Hash(hmap) = &entry.value {
                                 match hmap.get(&field) {
                                     Some(val) => {
                                         let response = format!("${}\r\n{}\r\n", val.len(), val);
@@ -440,45 +447,100 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                         }
                     }
             Command::RPopLPush(source, destination) => {
-                let mut map = db.write().await;
+                let mut popped_val = None;
+                
+                match db.write_multi_shards(&source, &destination).await {
+                    MultiWriteGuard::Single(mut shard) => {
+                        if let Some(entry) = shard.get_mut(&source) {
+                            if let engine::DataType::List(list) = &mut entry.value {
+                                popped_val = list.pop_back();
+                            }
+                        }
 
-                let popped_val = if let Some(entry) = map.get_mut(&source) {
-                    if let crate::engine::DataType::List(list) = &mut entry.value {
-                        list.pop_back()
-                    } else {
-                        None
+                        if let Some(val) = &popped_val {
+                            let dest_entry = shard.entry(destination.clone()).or_insert_with(|| Entry {
+                                value: engine::DataType::List(std::collections::VecDeque::new()),
+                                expires_at: None,
+                            });
+                            if let engine::DataType::List(dest_list) = &mut dest_entry.value {
+                                dest_list.push_front(val.clone());
+                            }
+                        }
                     }
-                } else {
-                    None
-                };
+
+                    MultiWriteGuard::Double(mut shard_src, mut shard_dest) => {
+                        if let Some(entry) = shard_src.get_mut(&source) {
+                            if let engine::DataType::List(list) = &mut entry.value {
+                                popped_val = list.pop_back();
+                            }
+                        }
+
+                        if let Some(val) = &popped_val {
+                            let dest_entry = shard_dest.entry(destination.clone()).or_insert_with(|| Entry {
+                                value: engine::DataType::List(std::collections::VecDeque::new()),
+                                expires_at: None
+                            });
+                            if let engine::DataType::List(dest_list) =&mut dest_entry.value {
+                                dest_list.push_front(val.clone());
+                            }
+                        }
+                    }
+                }
 
                 match popped_val {
                     Some(val) => {
-                        let dest_entry = map.entry(destination.clone()).or_insert_with(|| Entry {
-                            value: crate::engine::DataType::List(std::collections::VecDeque::new()),
-                            expires_at: None,
-                        });
-
-                        if let crate::engine::DataType::List(dest_list) = &mut dest_entry.value {
-                            dest_list.push_front(val.clone());
-
-                            let mut file = OpenOptions::new().create(true).append(true).open("database.aof").await.unwrap();
+                        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("database.aof").await {
                             let log = format!("RPOPLPUSH {} {}\n", source, destination);
                             let _ = file.write_all(log.as_bytes()).await;
-
-                            let response = format!("${}\r\n{}\r\n", val.len(), val);
-                            let _ = stream.write_all(response.as_bytes()).await;
-                        } else {
-                            let _ = stream.write_all(b"-WRONGTYPE Destination is no a list\r\n").await;
                         }
+                        let response = format!("${}\r\n{}\r\n", val.len(), val);
+                        let _ = stream.write_all(response.as_bytes()).await;
                     }
                     None => {
                         let _ = stream.write_all(b"$-1\r\n").await;
                     }
                 }
+                // let popped_val = {
+                //     let mut map = db.write_shard(&source).await;
+                //     if let Some(entry) = map.get_mut(&source) {
+                //         if let crate::engine::DataType::List(list) = &mut entry.value {
+                //             list.pop_back()
+                //         } else {
+                //             None
+                //         }
+                //     } else {
+                //         None
+                //     }
+                // };
+
+                // match popped_val {
+                //     Some(val) => {
+                //         let mut map = db.write_shard(&destination).await;
+                //         let dest_entry = map.entry(destination.clone()).or_insert_with(|| Entry {
+                //             value: crate::engine::DataType::List(std::collections::VecDeque::new()),
+                //             expires_at: None,
+                //         });
+
+                //         if let crate::engine::DataType::List(dest_list) = &mut dest_entry.value {
+                //             dest_list.push_front(val.clone());
+
+                //             let mut file = OpenOptions::new().create(true).append(true).open("database.aof").await.unwrap();
+                //             let log = format!("RPOPLPUSH {} {}\n", source, destination);
+                //             let _ = file.write_all(log.as_bytes()).await;
+
+                //             let response = format!("${}\r\n{}\r\n", val.len(), val);
+                //             let _ = stream.write_all(response.as_bytes()).await;
+                //         } else {
+                //             let _ = stream.write_all(b"-WRONGTYPE Destination is no a list\r\n").await;
+                //         }
+                //     }
+                //     None => {
+                //         let _ = stream.write_all(b"$-1\r\n").await;
+                //     }
+                // }
             }
             Command::LRem(key, _count, value_to_remove) => {
-                let mut map = db.write().await;
+                let mut map = db.write_shard(&key).await;
                 let mut removed = false;
 
                 if let Some(entry) = map.get_mut(&key) {
@@ -518,7 +580,7 @@ pub async fn run(address: &str, db: Db, pubsub: PubSub) {
         match listener.accept().await {
             Ok((stream, socket_addr)) => {
                 crate::log_info!("Server", "New connection from {}", socket_addr);
-                let db_handle = Arc::clone(&db);
+                let db_handle = db.clone();
                 let pubsub_handle = Arc::clone(&pubsub);
 
                 tokio::spawn(async move {
