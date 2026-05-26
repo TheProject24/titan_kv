@@ -125,33 +125,52 @@ Before Tokio took over async dispatch, Titan KV shipped a fully hand-rolled OS t
 
 ## Commands
 
-| Command        | Syntax                        | Response                    | Notes                                               |
-| -------------- | ----------------------------- | --------------------------- | --------------------------------------------------- |
-| **Keys**       |                               |                             |                                                     |
-| `PING`         | `PING`                        | `+PONG`                     | Connection health check                             |
-| `SET`          | `SET key value`               | `+OK`                       | Write to shard + AOF                                |
-| `GET`          | `GET key`                     | `$<len>\r\n<val>` or `$-1`  | Lazy expiry check on read                           |
-| `DEL`          | `DEL key`                     | `:1` or `:0`                | Removes key from shard + AOF entry                  |
-| `EXISTS`       | `EXISTS key`                  | `:1` or `:0`                | Read-only, acquires shard read guard                |
-| `INCR`         | `INCR key`                    | `:<new_value>` or `-ERR`    | Atomic integer increment within shard               |
-| `SETEX`        | `SETEX key seconds value`     | `+OK`                       | Write with TTL; expiry stored as `SystemTime`       |
-| **Lists**      |                               |                             |                                                     |
-| `LPUSH`        | `LPUSH key value`             | `:<length>`                 | Push to head of list (`VecDeque::push_front`)       |
-| `RPUSH`        | `RPUSH key value`             | `:<length>`                 | Push to tail of list (`VecDeque::push_back`)        |
-| `LPOP`         | `LPOP key`                    | `$<len>\r\n<val>`           | Pop from head of list                               |
-| `RPOP`         | `RPOP key`                    | `$<len>\r\n<val>`           | Pop from tail of list                               |
-| `RPOPLPUSH`    | `RPOPLPUSH source dest`       | `$<len>\r\n<val>` or `$-1`  | Atomic tail-pop → head-push; cross-shard deadlock-safe |
-| `LREM`         | `LREM key count value`        | `:1` or `:0`                | Remove first matching element from list             |
-| `LTRIM`        | `LTRIM key start stop`        | `+OK`                       | Trim list to range; supports negative indices       |
-| `LRANGE`       | `LRANGE key start stop`       | `*<count>\r\n...`           | Get range of elements; supports negative indices    |
-| **Hashes**     |                               |                             |                                                     |
-| `HSET`         | `HSET key field value`        | `+OK`                       | Add or update a field in a hash                     |
-| `HGET`         | `HGET key field`              | `$<len>\r\n<val>` or `$-1`  | Get the value of a field                            |
-| `HGETALL`      | `HGETALL key`                 | `*<count>\r\n...`           | Retrieve all fields and values from a hash          |
-| **PubSub**     |                               |                             |                                                     |
-| `PUBLISH`      | `PUBLISH channel msg`         | `:<receivers>`              | Push a message into the event bus                   |
-| `SUBSCRIBE`    | `SUBSCRIBE channel`           | `*3\r\n...`                 | Listen for broadcasts indefinitely                  |
-| `UNSUBSCRIBE`  | `UNSUBSCRIBE channel`         | `*3\r\n...`                 | End a subscription                                  |
+| Command            | Syntax                    | Response                   | Notes                                                  |
+| ------------------ | ------------------------- | -------------------------- | ------------------------------------------------------ |
+| **Keys / General** |                           |                            |                                                        |
+| `PING`             | `PING`                    | `+PONG`                    | Connection health check                                |
+| `SET`              | `SET key value`           | `+OK`                      | Write to shard + AOF                                   |
+| `GET`              | `GET key`                 | `$<len>\r\n<val>` or `$-1` | Lazy expiry check on read                              |
+| `MGET`             | `MGET key1 key2 ...`      | `*<count>\r\n...`          | Get multiple keys                                      |
+| `DEL`              | `DEL key`                 | `:1` or `:0`               | Removes key from shard + AOF entry                     |
+| `EXISTS`           | `EXISTS key`              | `:1` or `:0`               | Read-only, acquires shard read guard                   |
+| `INCR`             | `INCR key`                | `:<new_value>` or `-ERR`   | Atomic integer increment within shard                  |
+| `SETEX`            | `SETEX key seconds value` | `+OK`                      | Write with TTL; expiry stored as `SystemTime`          |
+| `TYPE`             | `TYPE key`                | `+<type>`                  | Return the type of value stored                        |
+| `TTL` / `PTTL`     | `TTL key`                 | `:<seconds>` or `:-2`      | Returns remaining time to live                         |
+| `KEYS`             | `KEYS pattern`            | `*<count>\r\n...`          | Find all keys matching given pattern                   |
+| `SCAN`             | `SCAN cursor [MATCH pat]` | `*2\r\n...`                | Incrementally iterate keyspace                         |
+| `STRLEN`           | `STRLEN key`              | `:<len>`                   | Get length of string value                             |
+| **Lists**          |                           |                            |                                                        |
+| `LPUSH`            | `LPUSH key value`         | `:<length>`                | Push to head of list (`VecDeque::push_front`)          |
+| `RPUSH`            | `RPUSH key value`         | `:<length>`                | Push to tail of list (`VecDeque::push_back`)           |
+| `LPOP`             | `LPOP key`                | `$<len>\r\n<val>`          | Pop from head of list                                  |
+| `RPOP`             | `RPOP key`                | `$<len>\r\n<val>`          | Pop from tail of list                                  |
+| `RPOPLPUSH`        | `RPOPLPUSH source dest`   | `$<len>\r\n<val>` or `$-1` | Atomic tail-pop → head-push; cross-shard deadlock-safe |
+| `LREM`             | `LREM key count value`    | `:1` or `:0`               | Remove first matching element from list                |
+| `LTRIM`            | `LTRIM key start stop`    | `+OK`                      | Trim list to range; supports negative indices          |
+| `LRANGE`           | `LRANGE key start stop`   | `*<count>\r\n...`          | Get range of elements; supports negative indices       |
+| `LLEN`             | `LLEN key`                | `:<len>`                   | Gets the length of a list                              |
+| **Hashes**         |                           |                            |                                                        |
+| `HSET`             | `HSET key field value`    | `+OK`                      | Add or update a field in a hash                        |
+| `HGET`             | `HGET key field`          | `$<len>\r\n<val>` or `$-1` | Get the value of a field                               |
+| `HGETALL`          | `HGETALL key`             | `*<count>\r\n...`          | Retrieve all fields and values from a hash             |
+| `HLEN`             | `HLEN key`                | `:<len>`                   | Get number of fields in a hash                         |
+| **Sets**           |                           |                            |                                                        |
+| `SADD`             | `SADD key member`         | `:1` or `:0`               | Add member to a set                                    |
+| `SMEMBERS`         | `SMEMBERS key`            | `*<count>\r\n...`          | Get all members of a set                               |
+| `SCARD`            | `SCARD key`               | `:<len>`                   | Get number of members in a set                         |
+| `SINTER`           | `SINTER key1 key2`        | `*<count>\r\n...`          | Intersect multiple sets                                |
+| **PubSub**         |                           |                            |                                                        |
+| `PUBLISH`          | `PUBLISH channel msg`     | `:<receivers>`             | Push a message into the event bus                      |
+| `SUBSCRIBE`        | `SUBSCRIBE channel`       | `*3\r\n...`                | Listen for broadcasts indefinitely                     |
+| `UNSUBSCRIBE`      | `UNSUBSCRIBE channel`     | `*3\r\n...`                | End a subscription                                     |
+| **Server**         |                           |                            |                                                        |
+| `INFO`             | `INFO`                    | `$<len>\r\n...`            | Get server information and stats                       |
+| `DBSIZE`           | `DBSIZE`                  | `:<len>`                   | Return number of keys in the selected DB               |
+| `MONITOR`          | `MONITOR`                 | `+OK`                      | Stream all processed commands in real-time             |
+| `CLIENT LIST`      | `CLIENT LIST`             | `$<len>\r\n...`            | Get list of client connections                         |
+| `MEMORY USAGE`     | `MEMORY USAGE key`        | `:<bytes>`                 | Estimate memory used by key                            |
 
 ---
 
@@ -352,13 +371,12 @@ redis-benchmark -p 6379 -n 100000 -c 50 -t set,get
 
 ---
 
-### Advanced Data Structures
+### Advanced Data Structures (In-Progress)
 
-> _Strings, Lists, Hashes, and beyond._
+> _Strings, Lists, Hashes, Sets, and beyond._
 
-With String, `VecDeque`-backed List, and `HashMap`-backed Hash already in place, the engine's `DataType` enum could expand to:
+With String, `VecDeque`-backed List, `HashMap`-backed Hash, and newly introduced `HashSet`-backed Sets already in place, the engine's `DataType` enum continues to expand:
 
-- **Sets** — `SADD`, `SREM`, `SMEMBERS`, `SISMEMBER` backed by a `HashSet<String>`
 - **Sorted Sets** — `ZADD`, `ZRANGE`, `ZSCORE` to support leaderboard-like operations
 
 ---

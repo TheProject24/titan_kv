@@ -470,10 +470,10 @@ footer span { color: var(--rust); }
       <a href="#commands"     class="btn btn-s">⌗ Commands</a>
     </div>
 
-    <div class="stats">
-      <div><div class="stat-n">21</div><div class="stat-l">Commands</div></div>
+    <div class="stats fi">
+      <div><div class="stat-n">40</div><div class="stat-l">Commands</div></div>
       <div><div class="stat-n">64</div><div class="stat-l">Shards</div></div>
-      <div><div class="stat-n">3</div> <div class="stat-l">Data Types</div></div>
+      <div><div class="stat-n">4</div> <div class="stat-l">Data Types</div></div>
       <div><div class="stat-n">6379</div><div class="stat-l">Default Port</div></div>
       <div><div class="stat-n">0</div> <div class="stat-l">unsafe blocks</div></div>
     </div>
@@ -658,7 +658,7 @@ footer span { color: var(--rust); }
       <div class="card-icon ic-c">🌐</div>
       <div class="card-title">server.rs</div>
       <div class="card-file">The Listener</div>
-      <div class="card-body">A Tokio <code>TcpListener</code> accepts connections in a tight loop. Each accepted connection is handed off to <code>tokio::spawn</code>, giving every client its own lightweight async task. Manages RESP input, command dispatch against the sharded DB, AOF writes, and response serialization for all 21 commands.</div>
+      <div class="card-body">A Tokio <code>TcpListener</code> accepts connections in a tight loop. Each accepted connection is handed off to <code>tokio::spawn</code>, giving every client its own lightweight async task. Manages RESP input, command dispatch against the sharded DB, AOF writes, and response serialization for all <strong style="color:var(--text)">40 commands</strong>. Thread-safety is strictly maintained by dropping <code>MutexGuard</code>s before async yields.</div>
     </div>
     <div class="card">
       <div class="card-icon ic-p">⟨/⟩</div>
@@ -755,11 +755,13 @@ footer span { color: var(--rust); }
   <p class="sec-sub">21 commands across 4 categories. All follow the Redis RESP protocol — connect with any existing Redis client, unchanged.</p>
 
   <div class="cmd-tabs">
-    <button class="cmd-tab on"  data-cat="all">All (21)</button>
-    <button class="cmd-tab"     data-cat="keys">Keys</button>
+    <button class="cmd-tab on"  data-cat="all">All (40)</button>
+    <button class="cmd-tab"     data-cat="keys">Keys / General</button>
     <button class="cmd-tab"     data-cat="lists">Lists</button>
     <button class="cmd-tab"     data-cat="hashes">Hashes</button>
+    <button class="cmd-tab"     data-cat="sets">Sets</button>
     <button class="cmd-tab"     data-cat="pubsub">PubSub</button>
+    <button class="cmd-tab"     data-cat="server">Server</button>
   </div>
 
   <div class="cmd-wrap">
@@ -769,24 +771,41 @@ footer span { color: var(--rust); }
         <tr class="cmd-row show" data-cat="keys">   <td><span class="cn">PING</span></td>         <td><span class="cs">PING</span></td>                          <td><span class="cr">+PONG</span></td>                          <td><span class="cn2">Connection health check</span></td></tr>
         <tr class="cmd-row show" data-cat="keys">   <td><span class="cn">SET</span></td>          <td><span class="cs">SET key value</span></td>                 <td><span class="cr">+OK</span></td>                            <td><span class="cn2">Write to shard + AOF</span></td></tr>
         <tr class="cmd-row show" data-cat="keys">   <td><span class="cn">GET</span></td>          <td><span class="cs">GET key</span></td>                       <td><span class="cr">$&lt;len&gt;\r\n&lt;val&gt; or $-1</span></td><td><span class="cn2">Lazy expiry check on read</span></td></tr>
+        <tr class="cmd-row show" data-cat="keys">   <td><span class="cn">MGET</span><span class="cmd-new">NEW</span></td>        <td><span class="cs">MGET key1 key2 ...</span></td>                       <td><span class="cr">*&lt;count&gt;\r\n...</span></td><td><span class="cn2">Get multiple keys</span></td></tr>
         <tr class="cmd-row show" data-cat="keys">   <td><span class="cn">DEL</span></td>          <td><span class="cs">DEL key</span></td>                       <td><span class="cr">:1 or :0</span></td>                        <td><span class="cn2">Removes key from shard + AOF entry</span></td></tr>
         <tr class="cmd-row show" data-cat="keys">   <td><span class="cn">EXISTS</span></td>       <td><span class="cs">EXISTS key</span></td>                    <td><span class="cr">:1 or :0</span></td>                        <td><span class="cn2">Read-only, acquires shard read guard</span></td></tr>
         <tr class="cmd-row show" data-cat="keys">   <td><span class="cn">INCR</span></td>         <td><span class="cs">INCR key</span></td>                      <td><span class="cr">:&lt;new_value&gt; or -ERR</span></td>       <td><span class="cn2">Atomic increment within shard</span></td></tr>
         <tr class="cmd-row show" data-cat="keys">   <td><span class="cn">SETEX</span></td>        <td><span class="cs">SETEX key seconds value</span></td>       <td><span class="cr">+OK</span></td>                            <td><span class="cn2">Write with TTL; expiry as SystemTime</span></td></tr>
-        <tr class="cmd-row show" data-cat="lists">  <td><span class="cn">LPUSH</span></td>        <td><span class="cs">LPUSH key value</span></td>               <td><span class="cr">:&lt;length&gt;</span></td>                  <td><span class="cn2">Push to head (VecDeque::push_front)</span></td></tr>
-        <tr class="cmd-row show" data-cat="lists">  <td><span class="cn">RPUSH</span></td>        <td><span class="cs">RPUSH key value</span></td>               <td><span class="cr">:&lt;length&gt;</span></td>                  <td><span class="cn2">Push to tail (VecDeque::push_back)</span></td></tr>
+        <tr class="cmd-row show" data-cat="keys">   <td><span class="cn">TYPE</span><span class="cmd-new">NEW</span></td>         <td><span class="cs">TYPE key</span></td>                      <td><span class="cr">+&lt;type&gt;</span></td>       <td><span class="cn2">Return the type of value stored</span></td></tr>
+        <tr class="cmd-row show" data-cat="keys">   <td><span class="cn">TTL / PTTL</span><span class="cmd-new">NEW</span></td>   <td><span class="cs">TTL key</span></td>                      <td><span class="cr">:&lt;seconds&gt; or :-2</span></td>       <td><span class="cn2">Returns remaining time to live</span></td></tr>
+        <tr class="cmd-row show" data-cat="keys">   <td><span class="cn">KEYS</span><span class="cmd-new">NEW</span></td>         <td><span class="cs">KEYS pattern</span></td>                      <td><span class="cr">*&lt;count&gt;\r\n...</span></td>       <td><span class="cn2">Find all keys matching given pattern</span></td></tr>
+        <tr class="cmd-row show" data-cat="keys">   <td><span class="cn">SCAN</span><span class="cmd-new">NEW</span></td>         <td><span class="cs">SCAN cursor [MATCH pat]</span></td>                      <td><span class="cr">*2\r\n...</span></td>       <td><span class="cn2">Incrementally iterate keyspace</span></td></tr>
+        <tr class="cmd-row show" data-cat="keys">   <td><span class="cn">STRLEN</span><span class="cmd-new">NEW</span></td>       <td><span class="cs">STRLEN key</span></td>                      <td><span class="cr">:&lt;len&gt;</span></td>       <td><span class="cn2">Get length of string value</span></td></tr>
+        <tr class="cmd-row show" data-cat="lists">  <td><span class="cn">LPUSH</span></td>        <td><span class="cs">LPUSH key value</span></td>               <td><span class="cr">:&lt;length&gt;</span></td>                  <td><span class="cn2">Push to head</span></td></tr>
+        <tr class="cmd-row show" data-cat="lists">  <td><span class="cn">RPUSH</span></td>        <td><span class="cs">RPUSH key value</span></td>               <td><span class="cr">:&lt;length&gt;</span></td>                  <td><span class="cn2">Push to tail</span></td></tr>
         <tr class="cmd-row show" data-cat="lists">  <td><span class="cn">LPOP</span></td>         <td><span class="cs">LPOP key</span></td>                      <td><span class="cr">$&lt;len&gt;\r\n&lt;val&gt;</span></td>        <td><span class="cn2">Pop from head</span></td></tr>
-        <tr class="cmd-row show" data-cat="lists">  <td><span class="cn">RPOP</span></td>         <td><span class="cs">RPOP key</span></td>                      <td><span class="cr">$&lt;len&gt;\r\n&lt;val&gt;</span></td>        <td><span class="cn2">Pop from tail</span></td></tr>
-        <tr class="cmd-row show" data-cat="lists">  <td><span class="cn">RPOPLPUSH</span><span class="cmd-new">NEW</span></td><td><span class="cs">RPOPLPUSH src dest</span></td><td><span class="cr">$&lt;len&gt;\r\n&lt;val&gt; or $-1</span></td><td><span class="cn2">Atomic tail-pop → head-push; cross-shard safe</span></td></tr>
-        <tr class="cmd-row show" data-cat="lists">  <td><span class="cn">LREM</span><span class="cmd-new">NEW</span></td>     <td><span class="cs">LREM key count value</span></td>         <td><span class="cr">:1 or :0</span></td>                        <td><span class="cn2">Remove first matching element from list</span></td></tr>
-        <tr class="cmd-row show" data-cat="lists">  <td><span class="cn">LTRIM</span></td>        <td><span class="cs">LTRIM key start stop</span></td>          <td><span class="cr">+OK</span></td>                            <td><span class="cn2">Trim list to range; supports negative indices</span></td></tr>
+        <tr class="cmd-row show" data-cat="lists">  <td><span class="cn">RPOP</span><span class="cmd-new">NEW</span></td>         <td><span class="cs">RPOP key</span></td>                      <td><span class="cr">$&lt;len&gt;\r\n&lt;val&gt;</span></td>        <td><span class="cn2">Pop from tail</span></td></tr>
+        <tr class="cmd-row show" data-cat="lists">  <td><span class="cn">RPOPLPUSH</span></td><td><span class="cs">RPOPLPUSH src dest</span></td><td><span class="cr">$&lt;len&gt;\r\n&lt;val&gt; or $-1</span></td><td><span class="cn2">Atomic tail-pop → head-push; cross-shard safe</span></td></tr>
+        <tr class="cmd-row show" data-cat="lists">  <td><span class="cn">LREM</span></td>     <td><span class="cs">LREM key count value</span></td>         <td><span class="cr">:1 or :0</span></td>                        <td><span class="cn2">Remove first matching element from list</span></td></tr>
+        <tr class="cmd-row show" data-cat="lists">  <td><span class="cn">LTRIM</span><span class="cmd-new">NEW</span></td>        <td><span class="cs">LTRIM key start stop</span></td>          <td><span class="cr">+OK</span></td>                            <td><span class="cn2">Trim list to range; supports negative indices</span></td></tr>
         <tr class="cmd-row show" data-cat="lists">  <td><span class="cn">LRANGE</span></td>       <td><span class="cs">LRANGE key start stop</span></td>         <td><span class="cr">*&lt;count&gt;\r\n...</span></td>            <td><span class="cn2">Get range of elements; supports negative indices</span></td></tr>
+        <tr class="cmd-row show" data-cat="lists">  <td><span class="cn">LLEN</span><span class="cmd-new">NEW</span></td>         <td><span class="cs">LLEN key</span></td>                      <td><span class="cr">:&lt;len&gt;</span></td>       <td><span class="cn2">Gets the length of a list</span></td></tr>
         <tr class="cmd-row show" data-cat="hashes"> <td><span class="cn">HSET</span></td>         <td><span class="cs">HSET key field value</span></td>          <td><span class="cr">+OK</span></td>                            <td><span class="cn2">Add or update a field in a hash</span></td></tr>
         <tr class="cmd-row show" data-cat="hashes"> <td><span class="cn">HGET</span></td>         <td><span class="cs">HGET key field</span></td>                <td><span class="cr">$&lt;len&gt;\r\n&lt;val&gt; or $-1</span></td><td><span class="cn2">Get the value of a field</span></td></tr>
         <tr class="cmd-row show" data-cat="hashes"> <td><span class="cn">HGETALL</span></td>      <td><span class="cs">HGETALL key</span></td>                   <td><span class="cr">*&lt;count&gt;\r\n...</span></td>            <td><span class="cn2">Retrieve all fields and values</span></td></tr>
+        <tr class="cmd-row show" data-cat="hashes"> <td><span class="cn">HLEN</span><span class="cmd-new">NEW</span></td>         <td><span class="cs">HLEN key</span></td>                      <td><span class="cr">:&lt;len&gt;</span></td>       <td><span class="cn2">Get number of fields in a hash</span></td></tr>
+        <tr class="cmd-row show" data-cat="sets">   <td><span class="cn">SADD</span><span class="cmd-new">NEW</span></td>         <td><span class="cs">SADD key member</span></td>               <td><span class="cr">:1 or :0</span></td>                      <td><span class="cn2">Add member to a set</span></td></tr>
+        <tr class="cmd-row show" data-cat="sets">   <td><span class="cn">SMEMBERS</span><span class="cmd-new">NEW</span></td>     <td><span class="cs">SMEMBERS key</span></td>                  <td><span class="cr">*&lt;count&gt;\r\n...</span></td>            <td><span class="cn2">Get all members of a set</span></td></tr>
+        <tr class="cmd-row show" data-cat="sets">   <td><span class="cn">SCARD</span><span class="cmd-new">NEW</span></td>        <td><span class="cs">SCARD key</span></td>                     <td><span class="cr">:&lt;len&gt;</span></td>                      <td><span class="cn2">Get number of members in a set</span></td></tr>
+        <tr class="cmd-row show" data-cat="sets">   <td><span class="cn">SINTER</span><span class="cmd-new">NEW</span></td>       <td><span class="cs">SINTER key1 key2</span></td>              <td><span class="cr">*&lt;count&gt;\r\n...</span></td>            <td><span class="cn2">Intersect multiple sets</span></td></tr>
         <tr class="cmd-row show" data-cat="pubsub"> <td><span class="cn">PUBLISH</span></td>      <td><span class="cs">PUBLISH channel msg</span></td>           <td><span class="cr">:&lt;receivers&gt;</span></td>               <td><span class="cn2">Push message into broadcast channel</span></td></tr>
         <tr class="cmd-row show" data-cat="pubsub"> <td><span class="cn">SUBSCRIBE</span></td>    <td><span class="cs">SUBSCRIBE channel</span></td>             <td><span class="cr">*3\r\n...</span></td>                      <td><span class="cn2">Listen for broadcasts; blocks connection</span></td></tr>
         <tr class="cmd-row show" data-cat="pubsub"> <td><span class="cn">UNSUBSCRIBE</span></td>  <td><span class="cs">UNSUBSCRIBE channel</span></td>           <td><span class="cr">*3\r\n...</span></td>                      <td><span class="cn2">End a subscription</span></td></tr>
+        <tr class="cmd-row show" data-cat="server"> <td><span class="cn">INFO</span><span class="cmd-new">NEW</span></td>         <td><span class="cs">INFO</span></td>                          <td><span class="cr">$&lt;len&gt;\r\n...</span></td>              <td><span class="cn2">Get server information and stats</span></td></tr>
+        <tr class="cmd-row show" data-cat="server"> <td><span class="cn">DBSIZE</span><span class="cmd-new">NEW</span></td>       <td><span class="cs">DBSIZE</span></td>                        <td><span class="cr">:&lt;len&gt;</span></td>                      <td><span class="cn2">Return number of keys in the selected DB</span></td></tr>
+        <tr class="cmd-row show" data-cat="server"> <td><span class="cn">MONITOR</span><span class="cmd-new">NEW</span></td>      <td><span class="cs">MONITOR</span></td>                       <td><span class="cr">+OK</span></td>                         <td><span class="cn2">Stream all processed commands in real-time</span></td></tr>
+        <tr class="cmd-row show" data-cat="server"> <td><span class="cn">CLIENT LIST</span><span class="cmd-new">NEW</span></td>  <td><span class="cs">CLIENT LIST</span></td>                   <td><span class="cr">$&lt;len&gt;\r\n...</span></td>              <td><span class="cn2">Get list of client connections</span></td></tr>
+        <tr class="cmd-row show" data-cat="server"> <td><span class="cn">MEMORY USAGE</span><span class="cmd-new">NEW</span></td> <td><span class="cs">MEMORY USAGE key</span></td>              <td><span class="cr">:&lt;bytes&gt;</span></td>                    <td><span class="cn2">Estimate memory used by key</span></td></tr>
       </tbody>
     </table>
   </div>
@@ -1102,12 +1121,12 @@ footer span { color: var(--rust); }
         <div class="rm-tags"><span class="rm-tag">redis-benchmark</span><span class="rm-tag">throughput</span><span class="rm-tag">profiling</span><span class="rm-tag">flamegraph</span></div>
       </div>
     </div>
-    <div class="rm-item">
-      <div class="rm-dot">🗂</div>
+    <div class="rm-item fi">
+      <div class="rm-dot done">🗂</div>
       <div class="rm-body">
-        <div class="rm-title">Advanced Data Structures</div>
-        <div class="rm-desc">With String, List, and Hash already implemented, the engine's enum model could expand to <strong style="color:var(--text)">Sets</strong> (<code>SADD</code>, <code>SREM</code>, <code>SMEMBERS</code> backed by <code>HashSet&lt;String&gt;</code>) and <strong style="color:var(--text)">Sorted Sets</strong> (<code>ZADD</code>, <code>ZRANGE</code>, <code>ZSCORE</code> for leaderboard-like operations).</div>
-        <div class="rm-tags"><span class="rm-tag">Sets</span><span class="rm-tag">Sorted Sets</span><span class="rm-tag">HashSet</span><span class="rm-tag">BTreeMap</span></div>
+        <div class="rm-title" style="color:var(--green)">Advanced Data Structures — Sets Shipped</div>
+        <div class="rm-desc">With String, List, and Hash already implemented, the engine's enum model has successfully expanded to <strong style="color:var(--text)">Sets</strong> (<code>SADD</code>, <code>SREM</code>, <code>SMEMBERS</code> backed by <code>HashSet&lt;String&gt;</code>) and Server metrics parsing.</div>
+        <div class="rm-tags"><span class="rm-tag done-tag">Sets</span><span class="rm-tag done-tag">Server Monitor</span><span class="rm-tag done-tag">HashSet</span></div>
       </div>
     </div>
     <div class="rm-item">
