@@ -1,5 +1,6 @@
 // src/engine.rs
 
+
 pub type Db = ShardedDb;
 
 pub fn new_db() -> Db {
@@ -131,6 +132,28 @@ impl ShardedDb {
 
     pub async fn write_shard_by_index(&self, index: usize) -> RwLockWriteGuard<'_, HashMap<String, Entry>> {
         self.shards[index].write().await
+    }
+
+    pub async fn get_all_keys(&self) -> Vec<String> {
+        let mut collected_keys = Vec::new();
+
+        for i in 0..SHARD_COUNT {
+            let shard = self.shards[i].read().await;
+
+            for key in shard.keys() {
+                collected_keys.push(key.clone());
+            }
+        }
+
+        collected_keys
+    }
+
+    pub async fn scan_shard(&self, cursor: usize) -> Vec<String> {
+        if cursor >= SHARD_COUNT {
+            return Vec::new();
+        }
+        let shard = self.shards[cursor].read().await;
+        shard.keys().cloned().collect()
     }
 }
 

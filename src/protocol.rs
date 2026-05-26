@@ -28,6 +28,8 @@ pub enum Command {
     HSet(String, String, String),
     HGetAll(String),
     HGet(String, String),
+    Keys(String),
+    Scan(usize, Option<String>),
     Unknown,
 }
 
@@ -80,6 +82,18 @@ pub fn parse_command(parts: &[String]) -> Command {
         "MGET" if parts.len() == 3 => Command::MGet(parts[1].clone(), parts[2].clone()),
         "SADD" if parts.len() == 3 => Command::SAdd(parts[1].clone(), parts[2].clone()),
         "SINTER" if parts.len() == 3 => Command::SInter(parts[1].clone(), parts[2].clone()),
+        "KEYS" if parts.len() == 2 => Command::Keys(parts[1].clone()),
+        "SCAN" if parts.len() >= 2 => {
+            let cursor = parts[1].parse::<usize>().unwrap_or(0);
+
+            let mut match_pattern = None;
+
+            if parts.len() == 4 && parts[2].to_uppercase() == "MATCH" {
+                match_pattern = Some(parts[3].clone());
+            }
+
+            Command::Scan(cursor, match_pattern)
+         }
         _ => Command::Unknown,
     }
 }
