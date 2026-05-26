@@ -30,6 +30,11 @@ pub enum Command {
     HGet(String, String),
     Keys(String),
     Scan(usize, Option<String>),
+    Info,
+    Type(String),
+    Ttl(String),
+    Client,
+    Monitor,
     Unknown,
 }
 
@@ -94,6 +99,7 @@ pub fn parse_command(parts: &[String]) -> Command {
 
             Command::Scan(cursor, match_pattern)
          }
+        "MONITOR" if parts.len() == 1 => Command::Monitor,
         _ => Command::Unknown,
     }
 }

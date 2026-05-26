@@ -1,5 +1,10 @@
 // src/engine.rs
-
+use std::collections::{ HashMap, HashSet, VecDeque };
+use std::hash::{ Hash, Hasher };
+use std::collections::hash_map::DefaultHasher;
+use tokio::sync::{ broadcast, RwLock, RwLockReadGuard, RwLockWriteGuard };
+use std::sync::Arc;
+use std::time::SystemTime;
 
 pub type Db = ShardedDb;
 
@@ -11,24 +16,17 @@ pub enum MultiWriteGuard<'a> {
     Single(RwLockWriteGuard<'a, HashMap<String, Entry>>),
     Double(
         RwLockWriteGuard<'a, HashMap<String, Entry>>,
-        RwLockWriteGuard<'a, HashMap<String, Entry>>
-    )
+        RwLockWriteGuard<'a, HashMap<String, Entry>>,
+    ),
 }
 
 pub enum MultiReadGuard<'a> {
     Single(RwLockReadGuard<'a, HashMap<String, Entry>>),
     Double(
         RwLockReadGuard<'a, HashMap<String, Entry>>,
-        RwLockReadGuard<'a, HashMap<String, Entry>>
-    )  
+        RwLockReadGuard<'a, HashMap<String, Entry>>,
+    ),
 }
-
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::hash::{Hash, Hasher};
-use std::collections::hash_map::DefaultHasher;
-use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
-use std::sync::Arc;
-use std::time::SystemTime;
 
 const SHARD_COUNT: usize = 64;
 const SHARD_MASK: u64 = (SHARD_COUNT - 1) as u64;
@@ -48,6 +46,7 @@ pub struct Entry {
 
 pub struct ShardedDb {
     shards: Arc<[RwLock<HashMap<String, Entry>>; SHARD_COUNT]>,
+    pub tx: broadcast::Sender<String>,
 }
 
 impl ShardedDb {
@@ -57,13 +56,16 @@ impl ShardedDb {
             shards_vec.push(RwLock::new(HashMap::new()));
         }
 
-        let shards_boxed: Box<[RwLock<HashMap<String, Entry>>; SHARD_COUNT]> = 
-            shards_vec.into_boxed_slice().try_into().unwrap_or_else(|_| {
-                panic!("Failed to initialize database shard array structure.")
-            });
+        let shards_boxed: Box<[RwLock<HashMap<String, Entry>>; SHARD_COUNT]> = shards_vec
+            .into_boxed_slice()
+            .try_into()
+            .unwrap_or_else(|_| { panic!("Failed to initialize database shard array structure.") });
+
+        let (tx, _rx) = broadcast::channel(1024);
 
         Self {
             shards: Arc::from(shards_boxed),
+            tx,
         }
     }
 
@@ -126,11 +128,17 @@ impl ShardedDb {
         SHARD_COUNT
     }
 
-    pub async fn read_shard_by_index(&self, index: usize) -> RwLockReadGuard<'_, HashMap<String, Entry>> {
+    pub async fn read_shard_by_index(
+        &self,
+        index: usize
+    ) -> RwLockReadGuard<'_, HashMap<String, Entry>> {
         self.shards[index].read().await
     }
 
-    pub async fn write_shard_by_index(&self, index: usize) -> RwLockWriteGuard<'_, HashMap<String, Entry>> {
+    pub async fn write_shard_by_index(
+        &self,
+        index: usize
+    ) -> RwLockWriteGuard<'_, HashMap<String, Entry>> {
         self.shards[index].write().await
     }
 
@@ -161,6 +169,7 @@ impl Clone for ShardedDb {
     fn clone(&self) -> Self {
         Self {
             shards: Arc::clone(&self.shards),
+            tx: self.tx.clone(),
         }
     }
 }

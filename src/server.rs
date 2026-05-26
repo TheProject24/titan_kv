@@ -12,7 +12,8 @@ use tokio::io::{
 };
 use tokio::fs::OpenOptions;
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{ SystemTime, UNIX_EPOCH };
+use std::net::SocketAddr;
 
 async fn append_aof(log: String) {
     if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("database.aof").await {
@@ -26,7 +27,7 @@ use crate::engine::{ self, Db, Entry, MultiWriteGuard, MultiReadGuard };
 use crate::protocol::{ parse_command, Command, read_resp };
 // use crate::thread_pool::ThreadPool;
 
-async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
+async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub, socket_addr: SocketAddr) {
     let (read_half, mut stream) = stream.into_split();
     let mut reader = BufReader::new(read_half);
 
@@ -41,6 +42,7 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
         };
 
         let command = parse_command(&parts);
+
         let summary_parts: Vec<String> = parts
             .iter()
             .map(|p| {
@@ -48,6 +50,22 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
             })
             .collect();
         crate::log_info!("Command", "{}", summary_parts.join(" "));
+
+        if !parts.is_empty() && parts[0].to_uppercase() != "MONITOR" {
+            if let Ok(duration) = SystemTime::now().duration_since(UNIX_EPOCH) {
+                let timestamp = duration.as_secs_f64();
+
+                let cmd_string = parts
+                    .iter()
+                    .map(|p| format!("\"{}\"", p))
+                    .collect::<Vec<String>>()
+                    .join(" ");
+
+                let log_msg = format!("{} [0 {}] {}", timestamp, socket_addr, cmd_string);
+
+                let _ = db.tx.send(log_msg);
+            }
+        }
 
         match command {
             Command::SetEx(key, seconds, value) => {
@@ -77,16 +95,6 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                 });
 
                 let _ = stream.write_all(b"+OK\r\n").await;
-                // let new_entry = Entry {
-                //     value: crate::engine::DataType::String(value.clone()),
-                //     expires_at: None,
-                // };
-                // map.insert(key.clone(), new_entry);
-
-                // let log = format!("SET {} {}\n", key, value);
-                // append_aof(log).await;
-
-                // let _ = stream.write_all(b"+OK\r\n").await;
             }
             Command::Get(key) => {
                 let mut map = db.write_shard(&key).await;
@@ -509,7 +517,6 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                     }
                 }
             }
-
             Command::LRem(key, _count, value_to_remove) => {
                 let mut map = db.write_shard(&key).await;
                 let mut removed = false;
@@ -537,7 +544,6 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                     let _ = stream.write_all(b":0\r\n").await;
                 }
             }
-
             Command::MGet(key_a, key_b) => {
                 let mut val_a = None;
                 let mut val_b = None;
@@ -608,7 +614,6 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
 
                 let _ = stream.write_all(format!(":{}\r\n", added).as_bytes()).await;
             }
-
             Command::SInter(key_a, key_b) => {
                 let mut set_a = std::collections::HashSet::new();
                 let mut set_b = std::collections::HashSet::new();
@@ -653,7 +658,6 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
 
                 let _ = stream.write_all(response.as_bytes()).await;
             }
-
             Command::Keys(pattern) => {
                 let regex_string = format!("^{}$", pattern.replace("*", ".*").replace("?", "."));
 
@@ -714,6 +718,26 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
 
                 let _ = stream.write_all(response.as_bytes()).await;
             }
+            Command::Monitor => {
+                let _ = stream.write_all(b"+OK\r\n").await;
+
+                let mut rx = db.tx.subscribe();
+
+                loop {
+                    match rx.recv().await {
+                        Ok(msg) => {
+                            let response = format!("+{}\r\n", msg);
+                            if stream.write_all(response.as_bytes()).await.is_err() {
+                                break;
+                            }
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                            continue
+                        }
+                        Err(_) => break,
+                    }
+                }
+            }
             Command::Unknown => {
                 if let Err(e) = stream.write_all(b"-ERR unknown command\r\n").await {
                     crate::log_error!("Server", "Failed to write to client: {}", e);
@@ -735,8 +759,9 @@ pub async fn run(address: &str, db: Db, pubsub: PubSub) {
                 let db_handle = db.clone();
                 let pubsub_handle = Arc::clone(&pubsub);
 
+                // Transfer stream processing directly onto Tokio thread pools
                 tokio::spawn(async move {
-                    handle_connection(stream, db_handle, pubsub_handle).await;
+                    handle_connection(stream, db_handle, pubsub_handle, socket_addr).await;
                 });
             }
             Err(e) => {
