@@ -33,8 +33,17 @@ pub enum Command {
     Info,
     Type(String),
     Ttl(String),
+    ClientList,
     Client,
     Monitor,
+    Pttl(String),
+    Memory,
+    Llen(String),
+    Hlen(String),
+    Scard(String),
+    SMembers(String),
+    Strlen(String),
+    DbSize,
     Unknown,
 }
 
@@ -100,6 +109,19 @@ pub fn parse_command(parts: &[String]) -> Command {
             Command::Scan(cursor, match_pattern)
          }
         "MONITOR" if parts.len() == 1 => Command::Monitor,
+        "INFO" => Command::Info,
+        "TYPE" if parts.len() == 2 => Command::Type(parts[1].clone()),
+        "TTL" if parts.len() == 2 => Command::Ttl(parts[1].clone()),
+        "PTTL" if parts.len() == 2 => Command::Pttl(parts[1].clone()),
+        "MEMORY" if parts.len() >= 2 && parts[1].to_uppercase() == "USAGE" => Command::Memory,
+        "LLEN" if parts.len() == 2 => Command::Llen(parts[1].clone()),
+        "HLEN" if parts.len() == 2 => Command::Hlen(parts[1].clone()),
+        "SCARD" if parts.len() == 2 => Command::Scard(parts[1].clone()),
+        "SMEMBERS" if parts.len() == 2 => Command::SMembers(parts[1].clone()),
+        "CLIENT" if parts.len() >= 2 && parts[1].to_uppercase() == "LIST" => Command::ClientList,
+        "STRLEN" if parts.len() == 2 => Command::Strlen(parts[1].clone()),
+        "DBSIZE" => Command::DbSize,
+        "CLIENT" => Command::Client,
         _ => Command::Unknown,
     }
 }

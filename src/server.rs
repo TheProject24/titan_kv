@@ -10,10 +10,33 @@ use tokio::io::{
     // AsyncBufReadExt,
     BufReader,
 };
+use std::collections::HashMap;
 use tokio::fs::OpenOptions;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{ SystemTime, UNIX_EPOCH };
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+struct ClientInfo {
+    id: u64,
+    addr: SocketAddr,
+    connected_at: SystemTime,
+}
+
+static NEXT_CLIENT_ID: AtomicU64 = AtomicU64::new(1);
+
+struct ClientGuard {
+    addr: SocketAddr,
+    clients: Arc<Mutex<HashMap<SocketAddr, ClientInfo>>>,
+}
+
+impl Drop for ClientGuard {
+    fn drop(&mut self) {
+        if let Ok(mut clients) = self.clients.lock() {
+            clients.remove(&self.addr);
+        }
+    }
+}
 
 async fn append_aof(log: String) {
     if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("database.aof").await {
@@ -27,7 +50,18 @@ use crate::engine::{ self, Db, Entry, MultiWriteGuard, MultiReadGuard };
 use crate::protocol::{ parse_command, Command, read_resp };
 // use crate::thread_pool::ThreadPool;
 
-async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub, socket_addr: SocketAddr) {
+async fn handle_connection(
+    stream: TcpStream, 
+    db: Db, 
+    pubsub: PubSub, 
+    socket_addr: SocketAddr,
+    active_clients: Arc<Mutex<HashMap<SocketAddr, ClientInfo>>>
+) {
+    let _guard = ClientGuard {
+        addr: socket_addr,
+        clients: active_clients.clone(),
+    };
+
     let (read_half, mut stream) = stream.into_split();
     let mut reader = BufReader::new(read_half);
 
@@ -68,6 +102,47 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub, socket_add
         }
 
         match command {
+            Command::ClientList => {
+                let mut buf = String::new();
+                let now = SystemTime::now();
+
+                {
+                    let clients = active_clients.lock().unwrap();
+
+                    for info in clients.values() {
+                        let age = now.duration_since(info.connected_at).unwrap_or_default().as_secs();
+
+                        buf.push_str(&format!(
+                            "id={} addr={} fd=-1 name= age={} idle=0 flags=N db=0 sub=0 psub=0 multi=-1 qbuf=0 qbuf-free=0 obl=0 oll=0 omem=0 events=r cmd=client\n",
+                            info.id, info.addr, age
+                        ));
+                    }
+                }
+
+                let response = format!("${}\r\n{}\r\n", buf.len(), buf);
+                let _ = stream.write_all(response.as_bytes()).await;
+            }
+            Command::Strlen(key) => {
+                let map = db.read_shard(&key).await;
+                let reply = match map.get(&key) {
+                    Some(entry) => match &entry.value {
+                        crate::engine::DataType::String(val) => format!(":{}\r\n", val.len()),
+                        _ => "-WRONGTYPE Operation against a key holding the wrong kind of value\r\n".to_string(),
+                    },
+                    None => ":0\r\n".to_string(), // Key doesn't exist, length is 0
+                };
+                let _ = stream.write_all(reply.as_bytes()).await;
+            }
+            Command::DbSize => {
+                let mut total_keys = 0;
+                // Safely cycle through every shard to sum up the global key landscape
+                for i in 0..db.get_shard_count() {
+                    let map = db.read_shard_by_index(i).await;
+                    total_keys += map.len();
+                }
+                let response = format!(":{}\r\n", total_keys);
+                let _ = stream.write_all(response.as_bytes()).await;
+            }
             Command::SetEx(key, seconds, value) => {
                 let expiration_time = SystemTime::now() + Duration::from_secs(seconds as u64);
 
@@ -738,6 +813,118 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub, socket_add
                     }
                 }
             }
+            Command::Info => {
+                let info_reply = "# Server\r\ntitan_version:2.0.0\r\nos:Linux\r\n";
+                let response = format!("${}\r\n{}\r\n", info_reply.len(), info_reply);
+                let _ = stream.write_all(response.as_bytes()).await;
+            }
+            Command::Client => {
+                let _ = stream.write_all(b"$-1\r\n").await;
+            }
+            Command::Ttl(key) => {
+                let map = db.read_shard(&key).await;
+                let reply = match map.get(&key) {
+                    Some(entry) => match entry.expires_at {
+                        Some(expiration) => {
+                            if let Ok(duration) = expiration.duration_since(std::time::SystemTime::now()) {
+                                format!(":{}\r\n", duration.as_secs())
+                            } else {
+                                ":-2\r\n".to_string()
+                            }
+                        }
+                        None => ":-1\r\n".to_string(),
+                    },
+                    None => ":-2\r\n".to_string(),
+                };
+                let _ = stream.write_all(reply.as_bytes()).await;
+            }
+            Command::Type(key) => {
+                let map = db.read_shard(&key).await;
+                let reply = match map.get(&key) {
+                    Some(entry) => match &entry.value {
+                        crate::engine::DataType::String(_) => "+string\r\n",
+                        crate::engine::DataType::List(_) => "+list\r\n",
+                        crate::engine::DataType::Hash(_) => "+hash\r\n",
+                        crate::engine::DataType::Set(_) => "+set\r\n",
+                    },
+                    None => "+none\r\n",
+                };
+                let _ = stream.write_all(reply.as_bytes()).await;
+            }
+            Command::Pttl(key) => {
+                let map = db.read_shard(&key).await;
+                let reply = match map.get(&key) {
+                    Some(entry) => match entry.expires_at {
+                        Some(expiration) => {
+                            if let Ok(duration) = expiration.duration_since(SystemTime::now()) {
+                                format!(":{}\r\n", duration.as_millis()) // Return MS precision TTL
+                            } else {
+                                ":-2\r\n".to_string() // Expired
+                            }
+                        }
+                        None => ":-1\r\n".to_string(), // No expiration set
+                    },
+                    None => ":-2\r\n".to_string(), // Key doesn't exist
+                };
+                let _ = stream.write_all(reply.as_bytes()).await;
+            }
+            Command::Memory => {
+                // Tiny RDM uses MEMORY USAGE to show bytes. Let's return a stable mock size
+                let _ = stream.write_all(b":64\r\n").await;
+            }
+            Command::Llen(key) => {
+                let map = db.read_shard(&key).await;
+                let reply = match map.get(&key) {
+                    Some(entry) => match &entry.value {
+                        crate::engine::DataType::List(list) => format!(":{}\r\n", list.len()),
+                        _ => "-WRONGTYPE Operation against a key holding the wrong kind of value\r\n".to_string(),
+                    },
+                    None => ":0\r\n".to_string(),
+                };
+                let _ = stream.write_all(reply.as_bytes()).await;
+            }
+            Command::Hlen(key) => {
+                let map = db.read_shard(&key).await;
+                let reply = match map.get(&key) {
+                    Some(entry) => match &entry.value {
+                        crate::engine::DataType::Hash(hmap) => format!(":{}\r\n", hmap.len()),
+                        _ => "-WRONGTYPE Operation against a key holding the wrong kind of value\r\n".to_string(),
+                    },
+                    None => ":0\r\n".to_string(),
+                };
+                let _ = stream.write_all(reply.as_bytes()).await;
+            }
+            Command::Scard(key) => {
+                let map = db.read_shard(&key).await;
+                let reply = match map.get(&key) {
+                    Some(entry) => match &entry.value {
+                        crate::engine::DataType::Set(set) => format!(":{}\r\n", set.len()),
+                        _ => "-WRONGTYPE Operation against a key holding the wrong kind of value\r\n".to_string(),
+                    },
+                    None => ":0\r\n".to_string(),
+                };
+                let _ = stream.write_all(reply.as_bytes()).await;
+            }
+            Command::SMembers(key) => {
+                let map = db.read_shard(&key).await;
+                match map.get(&key) {
+                    Some(entry) => match &entry.value {
+                        crate::engine::DataType::Set(set) => {
+                            let mut response = format!("*{}\r\n", set.len());
+                            for member in set {
+                                response.push_str(&format!("${}\r\n{}\r\n", member.len(), member));
+                            }
+                            let _ = stream.write_all(response.as_bytes()).await;
+                        }
+                        _ => {
+                            let _ = stream.write_all(b"-WRONGTYPE Operation against a key holding the wrong kind of value\r\n").await;
+                        }
+                    },
+                    None => {
+                        let _ = stream.write_all(b"*0\r\n").await;
+                    }
+                }
+            }
             Command::Unknown => {
                 if let Err(e) = stream.write_all(b"-ERR unknown command\r\n").await {
                     crate::log_error!("Server", "Failed to write to client: {}", e);
@@ -752,16 +939,31 @@ pub async fn run(address: &str, db: Db, pubsub: PubSub) {
     let listener = TcpListener::bind(address).await.expect("Could not bind to address");
     crate::log_success!("Server", "Titan KV natively deployed and listening on {}", address);
 
+    // Dynamic central state registry tracking active connections across thread pools
+    let active_clients = Arc::new(Mutex::new(HashMap::new()));
+
     loop {
         match listener.accept().await {
             Ok((stream, socket_addr)) => {
                 crate::log_info!("Server", "New connection from {}", socket_addr);
+                
                 let db_handle = db.clone();
                 let pubsub_handle = Arc::clone(&pubsub);
+                let clients_handle = active_clients.clone();
 
-                // Transfer stream processing directly onto Tokio thread pools
+                // Generate tracking meta context and save it prior to worker spawning
+                let client_id = NEXT_CLIENT_ID.fetch_add(1, Ordering::Relaxed);
+                {
+                    let mut clients = active_clients.lock().unwrap();
+                    clients.insert(socket_addr, ClientInfo {
+                        id: client_id,
+                        addr: socket_addr,
+                        connected_at: SystemTime::now(),
+                    });
+                }
+
                 tokio::spawn(async move {
-                    handle_connection(stream, db_handle, pubsub_handle, socket_addr).await;
+                    handle_connection(stream, db_handle, pubsub_handle, socket_addr, clients_handle).await;
                 });
             }
             Err(e) => {
