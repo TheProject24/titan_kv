@@ -22,6 +22,9 @@ pub enum Command {
     LRem(String, i64, String),
     LTrim(String, i32, i32),
     LRange(String, i32, i32),
+    MGet(String, String),
+    SAdd(String, String),
+    SInter(String, String),
     HSet(String, String, String),
     HGetAll(String),
     HGet(String, String),
@@ -74,6 +77,9 @@ pub fn parse_command(parts: &[String]) -> Command {
             Command::HSet(parts[1].clone(), parts[2].clone(), parts[3].clone()),
         "HGETALL" if parts.len() == 2 => Command::HGetAll(parts[1].clone()),
         "HGET" if parts.len() == 3 => Command::HGet(parts[1].clone(), parts[2].clone()),
+        "MGET" if parts.len() == 3 => Command::MGet(parts[1].clone(), parts[2].clone()),
+        "SADD" if parts.len() == 3 => Command::SAdd(parts[1].clone(), parts[2].clone()),
+        "SINTER" if parts.len() == 3 => Command::SInter(parts[1].clone(), parts[2].clone()),
         _ => Command::Unknown,
     }
 }

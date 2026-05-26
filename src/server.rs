@@ -26,7 +26,7 @@ async fn append_aof(log: String) {
     }
 }
 
-use crate::engine::{ self, Db, Entry, MultiWriteGuard };
+use crate::engine::{ self, Db, Entry, MultiWriteGuard, MultiReadGuard };
 use crate::protocol::{ parse_command, Command, read_resp };
 // use crate::thread_pool::ThreadPool;
 
@@ -561,6 +561,89 @@ async fn handle_connection(stream: TcpStream, db: Db, pubsub: PubSub) {
                 } else {
                     let _ = stream.write_all(b":0\r\n").await;
                 }
+            }
+            Command::MGet(key_a, key_b) => {
+                let mut val_a = None;
+                let mut val_b = None;
+
+                match db.read_multi_shards(&key_a, &key_b).await {
+                    MultiReadGuard::Single(shard) => {
+                        if let Some(entry) = shard.get(&key_a) {
+                            if let crate::engine::DataType::String(s) = &entry.value { val_a = Some(s.clone()); }
+                        }
+                        if let Some(entry) = shard.get(&key_b) {
+                            if let crate::engine::DataType::String(s) = &entry.value { val_b = Some(s.clone()); }
+                        }
+                    }
+
+                    MultiReadGuard::Double(shard_a, shard_b) => {
+                        if let Some(entry) = shard_a.get(&key_a) {
+                            if let crate::engine::DataType::String(s) = &entry.value { val_a = Some(s.clone()); }
+                        }
+                        if let Some(entry) = shard_b.get(&key_b) {
+                            if let crate::engine::DataType::String(s) = &entry.value { val_b = Some(s.clone()); }
+                        }
+                    }
+                }
+
+                let mut response = format!("*2\r\n");
+
+                for val in &[val_a, val_b] {
+                    match val {
+                        Some(s) => response.push_str(&format!("${}\r\n{}\r\n", s.len(), s)),
+                        None => response.push_str("$-1\r\n"),
+                    }
+                }
+
+                let _ = stream.write_all(response.as_bytes()).await;
+             }
+            Command::SAdd(key, member) => {
+                let mut shard = db.write_shard(&key).await;
+
+                let mut added = 0;
+
+                let entry = shard.entry(key.clone()).or_insert_with(|| crate::engine::Entry {
+                    value: crate::engine::DataType::Set(std::collections::HashSet::new()),
+                    expires_at: None,
+                });
+
+                if let crate::engine::DataType::Set(set) = &mut entry.value {
+                    if set.insert(member.clone()) {
+                        added = 1;
+
+                        if let Ok(mut file) = OpenOptions::new().create(true).open("database.aof").await {
+                            let log = format!("SADD {} {}\n", key, member);
+                            let _ = file.write_all(log.as_bytes()).await;
+                        }
+                    }
+                }
+
+                let _ = stream.write_all(format!(":{}\r\n", added).as_bytes()).await;
+            }
+            Command::SInter(key_a, key_b) => {
+                let mut set_a = std::collections::HashSet::new();
+                let mut set_b = std::collections::HashSet::new();
+
+                match db.read_multi_shards(&key_a, &key_b).await {
+                    MultiReadGuard::Single(shard) => {
+                        if let Some(e) = shard.get(&key_a) { if let crate::engine::DataType::Set(s) = &e.value { set_a =s.clone(); } }
+                        if let Some(e) = shard.get(&key_b) { if let crate::engine::DataType::Set(s) = &e.value{ set_b = s.clone(); } }
+                    }
+                    MultiReadGuard::Double(shard_a, shard_b) => {
+                        if let Some(e) = shard_a.get(&key_a) { if let crate::engine::DataType::Set(s) = &e.value { set_a = s.clone(); } }
+                        if let Some(e) = shard_b.get(&key_b) { if let crate::engine::DataType::Set(s) = &e.value { set_b = s.clone(); } }
+                    }
+                }
+
+                let intersection: Vec<&String> = set_a.iter().filter(|item| set_b.contains(*item)).collect();
+
+                let mut response = format!("*{}\r\n", intersection.len());
+
+                for item in intersection {
+                    response.push_str(&format!("${}\r\n{}\r\n", item.len(), item));
+                }
+
+                let _ = stream.write_all(response.as_bytes()).await;
             }
             Command::Unknown => {
                 if let Err(e) = stream.write_all(b"-ERR unknown command\r\n").await {

@@ -1,24 +1,6 @@
-// // src/engine.rs
-
-// use std::collections::{HashMap, VecDeque};
-// // use std::sync::{Arc, RwLock};
-// use std::sync::Arc;
-// use tokio::sync::{RwLock};
-// use std::time::SystemTime;
+// src/engine.rs
 
 pub type Db = ShardedDb;
-
-// pub struct Entry {
-//     pub value: DataType,
-//     pub expires_at: Option<SystemTime>,
-// }
-
-// #[derive(Debug, Clone)]
-// pub enum DataType {
-//     String(String),
-//     List(VecDeque<String>),
-//     HashMap(HashMap<String, String>),
-// }
 
 pub fn new_db() -> Db {
     ShardedDb::new()
@@ -32,15 +14,15 @@ pub enum MultiWriteGuard<'a> {
     )
 }
 
-// pub enum MultiReadGuard<'a> {
-//     Single(RwLockReadGuard<'a, HashMap<String, Entry>>),
-//     Double(
-//         RwLockReadGuard<'a, HashMap<String, Entry>>,
-//         RwLockReadGuard<'a, HashMap<String, Entry>>
-//     )  
-// }
+pub enum MultiReadGuard<'a> {
+    Single(RwLockReadGuard<'a, HashMap<String, Entry>>),
+    Double(
+        RwLockReadGuard<'a, HashMap<String, Entry>>,
+        RwLockReadGuard<'a, HashMap<String, Entry>>
+    )  
+}
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::collections::hash_map::DefaultHasher;
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -55,6 +37,7 @@ pub enum DataType {
     String(String),
     List(VecDeque<String>),
     Hash(HashMap<String, String>),
+    Set(HashSet<String>),
 }
 
 pub struct Entry {
@@ -116,6 +99,25 @@ impl ShardedDb {
             let guard_b = self.shards[idx_b].write().await;
             let guard_a = self.shards[idx_a].write().await;
             MultiWriteGuard::Double(guard_a, guard_b)
+        }
+    }
+
+    pub async fn read_multi_shards<'a>(&'a self, key_a: &str, key_b: &str) -> MultiReadGuard<'a> {
+        let idx_a = self.calculate_shard_index(key_a);
+        let idx_b = self.calculate_shard_index(key_b);
+
+        if idx_a == idx_b {
+            return MultiReadGuard::Single(self.shards[idx_a].read().await);
+        }
+
+        if idx_a < idx_b {
+            let guard_a = self.shards[idx_a].read().await;
+            let guard_b = self.shards[idx_b].read().await;
+            MultiReadGuard::Double(guard_a, guard_b)
+        } else {
+            let guard_a = self.shards[idx_a].read().await;
+            let guard_b = self.shards[idx_b].read().await;
+            MultiReadGuard::Double(guard_a, guard_b)
         }
     }
 
