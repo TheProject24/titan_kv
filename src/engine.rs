@@ -2,14 +2,14 @@
 use std::collections::{ HashMap, HashSet, VecDeque };
 use std::hash::{ Hash, Hasher };
 use std::collections::hash_map::DefaultHasher;
-use tokio::sync::{ broadcast, RwLock, RwLockReadGuard, RwLockWriteGuard };
+use tokio::sync::{ broadcast, RwLock, RwLockReadGuard, RwLockWriteGuard, mpsc };
 use std::sync::Arc;
 use std::time::SystemTime;
 
 pub type Db = ShardedDb;
 
-pub fn new_db() -> Db {
-    ShardedDb::new()
+pub fn new_db() -> (Db, mpsc::Receiver<String>) {
+    ShardedDb::new_db()
 }
 
 pub enum MultiWriteGuard<'a> {
@@ -31,7 +31,7 @@ pub enum MultiReadGuard<'a> {
 const SHARD_COUNT: usize = 64;
 const SHARD_MASK: u64 = (SHARD_COUNT - 1) as u64;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum DataType {
     String(String),
     List(VecDeque<String>),
@@ -39,6 +39,7 @@ pub enum DataType {
     Set(HashSet<String>),
 }
 
+#[derive(Debug)]
 pub struct Entry {
     pub value: DataType,
     pub expires_at: Option<SystemTime>,
@@ -47,26 +48,29 @@ pub struct Entry {
 pub struct ShardedDb {
     shards: Arc<[RwLock<HashMap<String, Entry>>; SHARD_COUNT]>,
     pub tx: broadcast::Sender<String>,
+    pub aof_tx: Arc<mpsc::Sender<String>>,
 }
 
 impl ShardedDb {
-    pub fn new() -> Self {
+    pub fn new_db() -> (ShardedDb, mpsc::Receiver<String>) {
         let mut shards_vec = Vec::with_capacity(SHARD_COUNT);
         for _ in 0..SHARD_COUNT {
             shards_vec.push(RwLock::new(HashMap::new()));
         }
-
-        let shards_boxed: Box<[RwLock<HashMap<String, Entry>>; SHARD_COUNT]> = shards_vec
-            .into_boxed_slice()
-            .try_into()
-            .unwrap_or_else(|_| { panic!("Failed to initialize database shard array structure.") });
-
+        let shards_boxed: Box<[RwLock<HashMap<String, Entry>>; SHARD_COUNT]> = 
+            shards_vec.into_boxed_slice().try_into().unwrap();
+    
         let (tx, _rx) = broadcast::channel(1024);
-
-        Self {
+        
+        let (aof_tx, aof_rx) = mpsc::channel(100_000);
+    
+        let db = ShardedDb { 
             shards: Arc::from(shards_boxed),
-            tx,
-        }
+            tx, 
+            aof_tx: Arc::new(aof_tx),
+        };
+    
+        (db, aof_rx)
     }
 
     fn calculate_shard_index(&self, key: &str) -> usize {
@@ -170,6 +174,7 @@ impl Clone for ShardedDb {
         Self {
             shards: Arc::clone(&self.shards),
             tx: self.tx.clone(),
+            aof_tx: Arc::clone(&self.aof_tx),
         }
     }
 }

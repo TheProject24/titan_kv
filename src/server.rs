@@ -11,7 +11,7 @@ use tokio::io::{
     BufReader,
 };
 use std::collections::HashMap;
-use tokio::fs::OpenOptions;
+// use tokio::fs::OpenOptions;
 use std::sync::{Arc, Mutex};
 use std::time::{ SystemTime, UNIX_EPOCH };
 use std::net::SocketAddr;
@@ -38,13 +38,13 @@ impl Drop for ClientGuard {
     }
 }
 
-async fn append_aof(log: String) {
-    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("database.aof").await {
-        let _ = file.write_all(log.as_bytes()).await;
-    } else {
-        crate::log_error!("AOF", "Failed to append to AOF file (Access Denied/Locked)");
-    }
-}
+// async fn append_aof(log: String) {
+//     if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("database.aof").await {
+//         let _ = file.write_all(log.as_bytes()).await;
+//     } else {
+//         crate::log_error!("AOF", "Failed to append to AOF file (Access Denied/Locked)");
+//     }
+// }
 
 use crate::engine::{ self, Db, Entry, MultiWriteGuard, MultiReadGuard };
 use crate::protocol::{ parse_command, Command, read_resp };
@@ -129,13 +129,12 @@ async fn handle_connection(
                         crate::engine::DataType::String(val) => format!(":{}\r\n", val.len()),
                         _ => "-WRONGTYPE Operation against a key holding the wrong kind of value\r\n".to_string(),
                     },
-                    None => ":0\r\n".to_string(), // Key doesn't exist, length is 0
+                    None => ":0\r\n".to_string(),
                 };
                 let _ = stream.write_all(reply.as_bytes()).await;
             }
             Command::DbSize => {
                 let mut total_keys = 0;
-                // Safely cycle through every shard to sum up the global key landscape
                 for i in 0..db.get_shard_count() {
                     let map = db.read_shard_by_index(i).await;
                     total_keys += map.len();
@@ -154,8 +153,10 @@ async fn handle_connection(
                 let mut map = db.write_shard(&key).await;
                 map.insert(key.clone(), new_entry);
 
+                // OPTIMIZED: Drop the log into our memory channel. It takes nanoseconds!
                 let log = format!("SETEX {} {} {}\n", key, seconds, value);
-                append_aof(log).await;
+                let _ = db.aof_tx.send(log).await; 
+                
                 let _ = stream.write_all(b"+OK\r\n").await;
             }
             Command::Ping => {
@@ -164,10 +165,14 @@ async fn handle_connection(
             Command::Set(key, value) => {
                 let mut shard = db.write_shard(&key).await;
 
-                shard.insert(key, Entry {
-                    value: engine::DataType::String(value),
+                shard.insert(key.clone(), Entry {
+                    value: engine::DataType::String(value.clone()),
                     expires_at: None,
                 });
+
+                // OPTIMIZED: Added missing AOF persistence for standard SET commands!
+                let log = format!("SET {} {}\n", key, value);
+                let _ = db.aof_tx.send(log).await;
 
                 let _ = stream.write_all(b"+OK\r\n").await;
             }
@@ -179,12 +184,12 @@ async fn handle_connection(
                         if let Some(expiration) = entry.expires_at {
                             if SystemTime::now() > expiration {
                                 if map.remove(&key).is_some() {
+                                    // OPTIMIZED: Async channel log for passive expiration delete
                                     let log = format!("DEL {}\n", key);
-                                    append_aof(log).await;
+                                    let _ = db.aof_tx.send(log).await;
 
                                     let _ = stream.write_all(b"$-1\r\n").await;
                                 }
-
                                 continue;
                             }
                         }
@@ -210,8 +215,9 @@ async fn handle_connection(
                 let not_there = map.remove(&key).is_some();
 
                 if not_there {
+                    // OPTIMIZED: Async channel log for explicit deletes
                     let log = format!("DEL {}\n", key);
-                    append_aof(log).await;
+                    let _ = db.aof_tx.send(log).await;
                     let _ = stream.write_all(b":1\r\n").await;
                 } else {
                     let _ = stream.write_all(b":0\r\n").await;
@@ -219,7 +225,6 @@ async fn handle_connection(
             }
             Command::Exists(key) => {
                 let map = db.read_shard(&key).await;
-
                 let key_exists = map.contains_key(&key);
 
                 if key_exists {
@@ -237,16 +242,11 @@ async fn handle_connection(
                                 match val.parse::<i64>() {
                                     Ok(num) => num,
                                     Err(_) => {
-                                        if
-                                            let Err(e) = stream.write_all(
+                                        if let Err(e) = stream.write_all(
                                                 b"-ERR Value is not an integer or out of range\r\n"
                                             ).await
                                         {
-                                            crate::log_error!(
-                                                "Client",
-                                                "Client disconnected during error response: {}",
-                                                e
-                                            );
+                                            crate::log_error!("Client", "Client disconnected during error response: {}", e);
                                             break;
                                         }
                                         continue;
@@ -270,8 +270,9 @@ async fn handle_connection(
                 };
                 map.insert(key.clone(), new_entry);
 
+                // OPTIMIZED: Async channel log for value increments
                 let log = format!("INCR {}\n", key);
-                append_aof(log).await;
+                let _ = db.aof_tx.send(log).await;
 
                 let response = format!(":{}\r\n", new_num);
                 let _ = stream.write_all(response.as_bytes()).await;
@@ -304,8 +305,9 @@ async fn handle_connection(
                         list.push_front(value.clone());
                         let len = list.len();
 
+                        // OPTIMIZED: Shifting LPush logs to the async channel memory buffer
                         let log = format!("LPUSH {} \"{}\"\n", key, value);
-                        append_aof(log).await;
+                        let _ = db.aof_tx.send(log).await;
 
                         let response = format!(":{}\r\n", len);
                         let _ = stream.write_all(response.as_bytes()).await;
@@ -324,8 +326,9 @@ async fn handle_connection(
                     match &mut entry.value {
                         crate::engine::DataType::List(list) => {
                             if let Some(val) = list.pop_front() {
+                                // OPTIMIZED: Shifting LPop logs to the async channel memory buffer
                                 let log = format!("LPOP {}\n", key);
-                                append_aof(log).await;
+                                let _ = db.aof_tx.send(log).await;
 
                                 let response = format!("${}\r\n{}\r\n", val.len(), val);
                                 let _ = stream.write_all(response.as_bytes()).await;
@@ -350,8 +353,9 @@ async fn handle_connection(
                     match &mut entry.value {
                         crate::engine::DataType::List(list) => {
                             if let Some(val) = list.pop_back() {
+                                // OPTIMIZED: Shifting RPop logs to the async channel memory buffer
                                 let log = format!("RPOP {}\n", key);
-                                append_aof(log).await;
+                                let _ = db.aof_tx.send(log).await;
 
                                 let response = format!("${}\r\n{}\r\n", val.len(), val);
                                 let _ = stream.write_all(response.as_bytes()).await;
@@ -398,8 +402,9 @@ async fn handle_connection(
                                 }
                             }
 
+                            // OPTIMIZED: Shifting LTrim logs to the async channel memory buffer
                             let log = format!("LTRIM {} {} {}\n", key, start, stop);
-                            append_aof(log).await;
+                            let _ = db.aof_tx.send(log).await;
 
                             let _ = stream.write_all(b"+OK\r\n").await;
                         }
@@ -462,8 +467,9 @@ async fn handle_connection(
                     list.push_back(value.clone());
                     let len = list.len();
 
+                    // OPTIMIZED: Shifting RPush logs to the async channel memory buffer
                     let log = format!("RPUSH {} \"{}\"\n", key, value);
-                    append_aof(log).await;
+                    let _ = db.aof_tx.send(log).await;
 
                     let response = format!(":{}\r\n", len);
                     let _ = stream.write_all(response.as_bytes()).await;
@@ -477,8 +483,10 @@ async fn handle_connection(
                 });
                 if let crate::engine::DataType::Hash(hmap) = &mut entry.value {
                     hmap.insert(field.clone(), value.clone());
+                    
+                    // OPTIMIZED: Shifting HSet logs to the async channel memory buffer
                     let log = format!("HSET {} {} \"{}\"\n", key, field, value);
-                    append_aof(log).await;
+                    let _ = db.aof_tx.send(log).await;
 
                     let response = format!("+OK\r\n");
                     let _ = stream.write_all(response.as_bytes()).await;
@@ -575,15 +583,10 @@ async fn handle_connection(
 
                 match popped_val {
                     Some(val) => {
-                        if
-                            let Ok(mut file) = OpenOptions::new()
-                                .create(true)
-                                .append(true)
-                                .open("database.aof").await
-                        {
-                            let log = format!("RPOPLPUSH {} {}\n", source, destination);
-                            let _ = file.write_all(log.as_bytes()).await;
-                        }
+                        // OPTIMIZED: Removed OpenOptions. Send log safely via memory channel.
+                        let log = format!("RPOPLPUSH {} {}\n", source, destination);
+                        let _ = db.aof_tx.send(log).await;
+                        
                         let response = format!("${}\r\n{}\r\n", val.len(), val);
                         let _ = stream.write_all(response.as_bytes()).await;
                     }
@@ -606,13 +609,9 @@ async fn handle_connection(
                 }
 
                 if removed {
-                    let mut file = OpenOptions::new()
-                        .create(true)
-                        .append(true)
-                        .open("database.aof").await
-                        .unwrap();
+                    // OPTIMIZED: No more file descriptor unpacking or unwrap() panics here!
                     let log = format!("LREM {} 1 \"{}\"\n", key, value_to_remove);
-                    let _ = file.write_all(log.as_bytes()).await;
+                    let _ = db.aof_tx.send(log).await;
 
                     let _ = stream.write_all(b":1\r\n").await;
                 } else {
@@ -664,7 +663,6 @@ async fn handle_connection(
             }
             Command::SAdd(key, member) => {
                 let mut shard = db.write_shard(&key).await;
-
                 let mut added = 0;
 
                 let entry = shard.entry(key.clone()).or_insert_with(|| crate::engine::Entry {
@@ -676,14 +674,9 @@ async fn handle_connection(
                     if set.insert(member.clone()) {
                         added = 1;
 
-                        if
-                            let Ok(mut file) = OpenOptions::new()
-                                .create(true)
-                                .open("database.aof").await
-                        {
-                            let log = format!("SADD {} {}\n", key, member);
-                            let _ = file.write_all(log.as_bytes()).await;
-                        }
+                        // OPTIMIZED: Shifted blocking raw file write out to async writer channel
+                        let log = format!("SADD {} {}\n", key, member);
+                        let _ = db.aof_tx.send(log).await;
                     }
                 }
 
@@ -739,7 +732,7 @@ async fn handle_connection(
                 let matcher = match regex::Regex::new(&regex_string) {
                     Ok(re) => re,
                     Err(_) => {
-                        let _ = stream.write_all(b"-ERR invalid pattern fromat\r\n").await;
+                        let _ = stream.write_all(b"-ERR invalid pattern format\r\n").await;
                         return;
                     }
                 };
@@ -829,12 +822,12 @@ async fn handle_connection(
                             if let Ok(duration) = expiration.duration_since(std::time::SystemTime::now()) {
                                 format!(":{}\r\n", duration.as_secs())
                             } else {
-                                ":-2\r\n".to_string()
+                                ":-2\r\n".to_string() // Already expired
                             }
                         }
-                        None => ":-1\r\n".to_string(),
+                        None => ":-1\r\n".to_string(), // Key exists but has no associated expire
                     },
-                    None => ":-2\r\n".to_string(),
+                    None => ":-2\r\n".to_string(), // Key does not exist
                 };
                 let _ = stream.write_all(reply.as_bytes()).await;
             }
@@ -946,12 +939,12 @@ pub async fn run(address: &str, db: Db, pubsub: PubSub) {
         match listener.accept().await {
             Ok((stream, socket_addr)) => {
                 crate::log_info!("Server", "New connection from {}", socket_addr);
-                
+                    
                 let db_handle = db.clone();
                 let pubsub_handle = Arc::clone(&pubsub);
                 let clients_handle = active_clients.clone();
 
-                // Generate tracking meta context and save it prior to worker spawning
+                    // Generate tracking meta context and save it prior to worker spawning
                 let client_id = NEXT_CLIENT_ID.fetch_add(1, Ordering::Relaxed);
                 {
                     let mut clients = active_clients.lock().unwrap();

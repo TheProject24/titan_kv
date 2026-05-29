@@ -18,16 +18,14 @@ async fn main() {
     #[cfg(windows)]
     let _ = colored::control::set_virtual_terminal(true);
 
-    let db = engine::new_db();
+    let (db, aof_rx) = engine::new_db();
 
-    // 1. Initialize State via AOF Replay
     replay_aof(&db).await;
 
-    // 2. Spawn Background Tasks
+    let _aof_writer_handle = start_aof_writer(aof_rx);
     start_expiration_sweeper(db.clone());
     start_aof_compactor(db.clone());
 
-    // 3. Boot TCP Server
     let address = "127.0.0.1:6379";
     let pubsub = pubsub::new_pubsub();
     server::run(address, db, pubsub).await;
@@ -245,4 +243,42 @@ fn start_aof_compactor(db: Db) {
             }
         }
     });
+}
+
+fn start_aof_writer(mut aof_rx: tokio::sync::mpsc::Receiver<String>) -> tokio::task::JoinHandle<()>{
+    tokio::spawn(async move {
+        if let Ok(mut file) = OpenOptions::new()
+            .create(true)  
+            .append(true)
+            .open("database.aof")
+            .await
+        {
+            let mut buffer = String::with_capacity(64 * 1024);
+            let mut flush_interval = tokio::time::interval(Duration::from_secs(1));
+
+            loop {
+                tokio::select! {
+                    Some(log) = aof_rx.recv() => {
+                        buffer.push_str(&log);
+
+                        if buffer.len() >= 64 * 1024 {
+                            let _ = file.write_all(buffer.as_bytes()).await;
+                            let _ = file.sync_data().await;
+                            buffer.clear();
+                        }
+                    }
+
+                    _ = flush_interval.tick() => {
+                        if !buffer.is_empty() {
+                            let _ = file.write_all(buffer.as_bytes()).await;
+                            let _ = file.sync_data().await;
+                            buffer.clear()
+                        }
+                    }
+                }                
+            }
+        } else {
+            crate::log_error!("AOF Writer", "Critical: Failed to open database.aof for writing!");
+        }
+    })
 }
