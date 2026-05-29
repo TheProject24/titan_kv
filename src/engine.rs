@@ -5,6 +5,7 @@ use std::collections::hash_map::DefaultHasher;
 use tokio::sync::{ broadcast, RwLock, RwLockReadGuard, RwLockWriteGuard, mpsc };
 use std::sync::Arc;
 use std::time::SystemTime;
+use bytes::Bytes;
 
 pub type Db = ShardedDb;
 
@@ -13,18 +14,18 @@ pub fn new_db() -> (Db, mpsc::Receiver<String>) {
 }
 
 pub enum MultiWriteGuard<'a> {
-    Single(RwLockWriteGuard<'a, HashMap<String, Entry>>),
+    Single(RwLockWriteGuard<'a, HashMap<Bytes, Entry>>),
     Double(
-        RwLockWriteGuard<'a, HashMap<String, Entry>>,
-        RwLockWriteGuard<'a, HashMap<String, Entry>>,
+        RwLockWriteGuard<'a, HashMap<Bytes, Entry>>,
+        RwLockWriteGuard<'a, HashMap<Bytes, Entry>>,
     ),
 }
 
 pub enum MultiReadGuard<'a> {
-    Single(RwLockReadGuard<'a, HashMap<String, Entry>>),
+    Single(RwLockReadGuard<'a, HashMap<Bytes, Entry>>),
     Double(
-        RwLockReadGuard<'a, HashMap<String, Entry>>,
-        RwLockReadGuard<'a, HashMap<String, Entry>>,
+        RwLockReadGuard<'a, HashMap<Bytes, Entry>>,
+        RwLockReadGuard<'a, HashMap<Bytes, Entry>>,
     ),
 }
 
@@ -33,10 +34,10 @@ const SHARD_MASK: u64 = (SHARD_COUNT - 1) as u64;
 
 #[derive(Clone, Debug)]
 pub enum DataType {
-    String(String),
-    List(VecDeque<String>),
-    Hash(HashMap<String, String>),
-    Set(HashSet<String>),
+    String(Bytes),
+    List(VecDeque<Bytes>),
+    Hash(HashMap<Bytes, Bytes>),
+    Set(HashSet<Bytes>),
 }
 
 #[derive(Debug)]
@@ -46,7 +47,7 @@ pub struct Entry {
 }
 
 pub struct ShardedDb {
-    shards: Arc<[RwLock<HashMap<String, Entry>>; SHARD_COUNT]>,
+    shards: Arc<[RwLock<HashMap<Bytes, Entry>>; SHARD_COUNT]>,
     pub tx: broadcast::Sender<String>,
     pub aof_tx: Arc<mpsc::Sender<String>>,
 }
@@ -57,40 +58,40 @@ impl ShardedDb {
         for _ in 0..SHARD_COUNT {
             shards_vec.push(RwLock::new(HashMap::new()));
         }
-        let shards_boxed: Box<[RwLock<HashMap<String, Entry>>; SHARD_COUNT]> = 
+        let shards_boxed: Box<[RwLock<HashMap<Bytes, Entry>>; SHARD_COUNT]> =
             shards_vec.into_boxed_slice().try_into().unwrap();
-    
+
         let (tx, _rx) = broadcast::channel(1024);
-        
+
         let (aof_tx, aof_rx) = mpsc::channel(100_000);
-    
-        let db = ShardedDb { 
+
+        let db = ShardedDb {
             shards: Arc::from(shards_boxed),
-            tx, 
+            tx,
             aof_tx: Arc::new(aof_tx),
         };
-    
+
         (db, aof_rx)
     }
 
-    fn calculate_shard_index(&self, key: &str) -> usize {
+    fn calculate_shard_index(&self, key: &[u8]) -> usize {
         let mut hasher = DefaultHasher::new();
         key.hash(&mut hasher);
         let hash_result = hasher.finish();
         (hash_result & SHARD_MASK) as usize
     }
 
-    pub async fn read_shard(&self, key: &str) -> RwLockReadGuard<'_, HashMap<String, Entry>> {
+    pub async fn read_shard(&self, key: &[u8]) -> RwLockReadGuard<'_, HashMap<Bytes, Entry>> {
         let index = self.calculate_shard_index(key);
         self.shards[index].read().await
     }
 
-    pub async fn write_shard(&self, key: &str) -> RwLockWriteGuard<'_, HashMap<String, Entry>> {
+    pub async fn write_shard(&self, key: &[u8]) -> RwLockWriteGuard<'_, HashMap<Bytes, Entry>> {
         let index = self.calculate_shard_index(key);
         self.shards[index].write().await
     }
 
-    pub async fn write_multi_shards<'a>(&'a self, key_a: &str, key_b: &str) -> MultiWriteGuard<'a> {
+    pub async fn write_multi_shards<'a>(&'a self, key_a: &[u8], key_b: &[u8]) -> MultiWriteGuard<'a> {
         let idx_a = self.calculate_shard_index(key_a);
         let idx_b = self.calculate_shard_index(key_b);
 
@@ -109,7 +110,7 @@ impl ShardedDb {
         }
     }
 
-    pub async fn read_multi_shards<'a>(&'a self, key_a: &str, key_b: &str) -> MultiReadGuard<'a> {
+    pub async fn read_multi_shards<'a>(&'a self, key_a: &[u8], key_b: &[u8]) -> MultiReadGuard<'a> {
         let idx_a = self.calculate_shard_index(key_a);
         let idx_b = self.calculate_shard_index(key_b);
 
@@ -135,37 +136,37 @@ impl ShardedDb {
     pub async fn read_shard_by_index(
         &self,
         index: usize
-    ) -> RwLockReadGuard<'_, HashMap<String, Entry>> {
+    ) -> RwLockReadGuard<'_, HashMap<Bytes, Entry>> {
         self.shards[index].read().await
     }
 
     pub async fn write_shard_by_index(
         &self,
         index: usize
-    ) -> RwLockWriteGuard<'_, HashMap<String, Entry>> {
+    ) -> RwLockWriteGuard<'_, HashMap<Bytes, Entry>> {
         self.shards[index].write().await
     }
 
-    pub async fn get_all_keys(&self) -> Vec<String> {
+    pub async fn get_all_keys(&self) -> Vec<Bytes> {
         let mut collected_keys = Vec::new();
 
         for i in 0..SHARD_COUNT {
             let shard = self.shards[i].read().await;
 
             for key in shard.keys() {
-                collected_keys.push(key.clone());
+                collected_keys.push(key.clone()); // O(1) refcount bump
             }
         }
 
         collected_keys
     }
 
-    pub async fn scan_shard(&self, cursor: usize) -> Vec<String> {
+    pub async fn scan_shard(&self, cursor: usize) -> Vec<Bytes> {
         if cursor >= SHARD_COUNT {
             return Vec::new();
         }
         let shard = self.shards[cursor].read().await;
-        shard.keys().cloned().collect()
+        shard.keys().cloned().collect() // O(1) per key
     }
 }
 

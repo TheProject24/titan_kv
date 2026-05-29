@@ -10,6 +10,7 @@ mod pubsub;
 use std::time::{SystemTime, Duration};
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use bytes::Bytes;
 use crate::engine::{DataType, Entry, Db};
 use crate::protocol::{parse_command, Command};
 
@@ -29,6 +30,10 @@ async fn main() {
     let address = "127.0.0.1:6379";
     let pubsub = pubsub::new_pubsub();
     server::run(address, db, pubsub).await;
+}
+
+fn bstr(b: &[u8]) -> &str {
+    std::str::from_utf8(b).unwrap_or("")
 }
 
 /// Asynchronously streams and parses the Append Only File to rebuild memory state.
@@ -72,14 +77,17 @@ async fn replay_aof(db: &Db) {
                     let mut map = db.write_shard(&k).await;
                     let current = match map.get(&k) {
                         Some(entry) => match &entry.value {
-                            DataType::String(val) => val.parse::<i64>().unwrap_or(0),
+                            DataType::String(val) => {
+                                std::str::from_utf8(val).ok()
+                                    .and_then(|s| s.parse::<i64>().ok()).unwrap_or(0)
+                            }
                             _ => 0,
                         },
                         None => 0,
                     };
 
                     let entry = Entry {
-                        value: DataType::String((current + 1).to_string()),
+                        value: DataType::String(Bytes::from((current + 1).to_string())),
                         expires_at: None,
                     };
 
@@ -164,19 +172,18 @@ fn start_expiration_sweeper(db: Db) {
                 for (key, entry) in map.iter() {
                     if let Some(expiration) = entry.expires_at {
                         if now > expiration {
-                            shard_keys_to_del.push(key.clone());
-                            all_keys_to_del.push(key.clone());
+                            shard_keys_to_del.push(key.clone()); // O(1)
+                            all_keys_to_del.push(key.clone());   // O(1)
                         }
                     }
                 }
 
                 for key in &shard_keys_to_del {
                     map.remove(key);
-                    crate::log_debug!("Sweeper", "Active Expiration Swept key: {}", key);
+                    crate::log_debug!("Sweeper", "Active Expiration Swept key: {}", bstr(key));
                 }
             }
 
-            // Sync structural deletes persistently to disk
             if !all_keys_to_del.is_empty() {
                 if let Ok(mut file) = OpenOptions::new()
                     .create(true)
@@ -184,7 +191,7 @@ fn start_expiration_sweeper(db: Db) {
                     .open("database.aof").await
                 {
                     for key in all_keys_to_del {
-                        let log = format!("DEL {}\n", key);
+                        let log = format!("DEL {}\n", bstr(&key));
                         let _ = file.write_all(log.as_bytes()).await;
                     }
                 }
@@ -205,30 +212,33 @@ fn start_aof_compactor(db: Db) {
                 let map = db.read_shard_by_index(i).await;
 
                 for (key, entry) in map.iter() {
+                    let k = bstr(key);
                     match &entry.value {
                         DataType::String(val) => {
+                            let v = bstr(val);
                             if let Some(expiration) = entry.expires_at {
                                 if let Ok(duration) = expiration.duration_since(SystemTime::now()) {
                                     let secs = duration.as_secs();
-                                    new_aof_content.push_str(&format!("SETEX {} {} \"{}\"\n", key, secs, val));
+                                    new_aof_content.push_str(&format!("SETEX {} {} \"{}\"\n", k, secs, v));
                                 }
                             } else {
-                                new_aof_content.push_str(&format!("SET {} \"{}\"\n", key, val));
+                                new_aof_content.push_str(&format!("SET {} \"{}\"\n", k, v));
                             }
                         }
                         DataType::List(list) => {
                             for item in list.iter().rev() {
-                                new_aof_content.push_str(&format!("LPUSH {} \"{}\"\n", key, item));
+                                new_aof_content.push_str(&format!("LPUSH {} \"{}\"\n", k, bstr(item)));
                             }
                         }
                         DataType::Hash(hmap) => {
                             for (field, value) in hmap {
-                                new_aof_content.push_str(&format!("HSET {} {} \"{}\"\n", key, field, value));
+                                new_aof_content.push_str(&format!("HSET {} {} \"{}\"\n",
+                                    k, bstr(field), bstr(value)));
                             }
                         }
                         DataType::Set(set) => {
                             for member in set {
-                                new_aof_content.push_str(&format!("SADD {} \"{}\"\n", key, member));
+                                new_aof_content.push_str(&format!("SADD {} \"{}\"\n", k, bstr(member)));
                             }
                         }
                     }
@@ -245,10 +255,10 @@ fn start_aof_compactor(db: Db) {
     });
 }
 
-fn start_aof_writer(mut aof_rx: tokio::sync::mpsc::Receiver<String>) -> tokio::task::JoinHandle<()>{
+fn start_aof_writer(mut aof_rx: tokio::sync::mpsc::Receiver<String>) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         if let Ok(mut file) = OpenOptions::new()
-            .create(true)  
+            .create(true)
             .append(true)
             .open("database.aof")
             .await
@@ -275,7 +285,7 @@ fn start_aof_writer(mut aof_rx: tokio::sync::mpsc::Receiver<String>) -> tokio::t
                             buffer.clear()
                         }
                     }
-                }                
+                }
             }
         } else {
             crate::log_error!("AOF Writer", "Critical: Failed to open database.aof for writing!");

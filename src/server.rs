@@ -1,21 +1,19 @@
 // src/server.rs
 
 use crate::pubsub::{ PubSub };
-// use std::fmt::format;
+use std::io::Write as IoWrite;
 use std::time::Duration;
 use tokio::net::{ TcpListener, TcpStream };
 use tokio::io::{
-    // AsyncReadExt,
     AsyncWriteExt,
-    // AsyncBufReadExt,
     BufReader,
 };
 use std::collections::HashMap;
-// use tokio::fs::OpenOptions;
 use std::sync::{Arc, Mutex};
 use std::time::{ SystemTime, UNIX_EPOCH };
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
+use bytes::Bytes;
 
 struct ClientInfo {
     id: u64,
@@ -38,22 +36,31 @@ impl Drop for ClientGuard {
     }
 }
 
-// async fn append_aof(log: String) {
-//     if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("database.aof").await {
-//         let _ = file.write_all(log.as_bytes()).await;
-//     } else {
-//         crate::log_error!("AOF", "Failed to append to AOF file (Access Denied/Locked)");
-//     }
-// }
-
 use crate::engine::{ self, Db, Entry, MultiWriteGuard, MultiReadGuard };
 use crate::protocol::{ parse_command, Command, read_resp };
-// use crate::thread_pool::ThreadPool;
+
+// Build a RESP bulk string into a single Vec<u8> so we do one write() syscall per response.
+// The header is a small format!(), the data is copied from stored Bytes — one allocation, one
+// syscall (same as the original format! path but now source data can be any &[u8]).
+macro_rules! write_bulk {
+    ($stream:expr, $val:expr) => {{
+        let header = format!("${}\r\n", $val.len());
+        let mut buf = Vec::with_capacity(header.len() + $val.len() + 2);
+        buf.extend_from_slice(header.as_bytes());
+        buf.extend_from_slice(&$val[..]);
+        buf.extend_from_slice(b"\r\n");
+        let _ = $stream.write_all(&buf).await;
+    }};
+}
+
+fn bytes_to_str(b: &[u8]) -> &str {
+    std::str::from_utf8(b).unwrap_or("")
+}
 
 async fn handle_connection(
-    stream: TcpStream, 
-    db: Db, 
-    pubsub: PubSub, 
+    stream: TcpStream,
+    db: Db,
+    pubsub: PubSub,
     socket_addr: SocketAddr,
     active_clients: Arc<Mutex<HashMap<SocketAddr, ClientInfo>>>
 ) {
@@ -66,8 +73,7 @@ async fn handle_connection(
     let mut reader = BufReader::new(read_half);
 
     loop {
-        // NEW: Uses our dedicated RESP reader
-        let parts: Vec<String> = match read_resp(&mut reader).await {
+        let parts: Vec<Bytes> = match read_resp(&mut reader).await {
             Ok(p) if !p.is_empty() => p,
             _ => {
                 crate::log_info!("Client", "Client Disconnected.");
@@ -80,23 +86,23 @@ async fn handle_connection(
         let summary_parts: Vec<String> = parts
             .iter()
             .map(|p| {
-                if p.len() > 30 { format!("{}...({}b)", &p[..15], p.len()) } else { p.clone() }
+                let s = bytes_to_str(p);
+                if s.len() > 30 { format!("{}...({}b)", &s[..15], s.len()) } else { s.to_string() }
             })
             .collect();
         crate::log_info!("Command", "{}", summary_parts.join(" "));
 
-        if !parts.is_empty() && parts[0].to_uppercase() != "MONITOR" {
+        if !parts.is_empty() && !parts[0].eq_ignore_ascii_case(b"MONITOR") {
             if let Ok(duration) = SystemTime::now().duration_since(UNIX_EPOCH) {
                 let timestamp = duration.as_secs_f64();
 
                 let cmd_string = parts
                     .iter()
-                    .map(|p| format!("\"{}\"", p))
+                    .map(|p| format!("\"{}\"", bytes_to_str(p)))
                     .collect::<Vec<String>>()
                     .join(" ");
 
                 let log_msg = format!("{} [0 {}] {}", timestamp, socket_addr, cmd_string);
-
                 let _ = db.tx.send(log_msg);
             }
         }
@@ -146,17 +152,16 @@ async fn handle_connection(
                 let expiration_time = SystemTime::now() + Duration::from_secs(seconds as u64);
 
                 let new_entry = Entry {
-                    value: crate::engine::DataType::String(value.clone()),
+                    value: crate::engine::DataType::String(value.clone()), // O(1)
                     expires_at: Some(expiration_time),
                 };
 
                 let mut map = db.write_shard(&key).await;
-                map.insert(key.clone(), new_entry);
+                map.insert(key.clone(), new_entry); // O(1)
 
-                // OPTIMIZED: Drop the log into our memory channel. It takes nanoseconds!
-                let log = format!("SETEX {} {} {}\n", key, seconds, value);
-                let _ = db.aof_tx.send(log).await; 
-                
+                let log = format!("SETEX {} {} {}\n", bytes_to_str(&key), seconds, bytes_to_str(&value));
+                let _ = db.aof_tx.send(log).await;
+
                 let _ = stream.write_all(b"+OK\r\n").await;
             }
             Command::Ping => {
@@ -165,13 +170,12 @@ async fn handle_connection(
             Command::Set(key, value) => {
                 let mut shard = db.write_shard(&key).await;
 
-                shard.insert(key.clone(), Entry {
-                    value: engine::DataType::String(value.clone()),
+                shard.insert(key.clone(), Entry { // O(1) clone
+                    value: engine::DataType::String(value.clone()), // O(1) clone
                     expires_at: None,
                 });
 
-                // OPTIMIZED: Added missing AOF persistence for standard SET commands!
-                let log = format!("SET {} {}\n", key, value);
+                let log = format!("SET {} {}\n", bytes_to_str(&key), bytes_to_str(&value));
                 let _ = db.aof_tx.send(log).await;
 
                 let _ = stream.write_all(b"+OK\r\n").await;
@@ -184,10 +188,8 @@ async fn handle_connection(
                         if let Some(expiration) = entry.expires_at {
                             if SystemTime::now() > expiration {
                                 if map.remove(&key).is_some() {
-                                    // OPTIMIZED: Async channel log for passive expiration delete
-                                    let log = format!("DEL {}\n", key);
+                                    let log = format!("DEL {}\n", bytes_to_str(&key));
                                     let _ = db.aof_tx.send(log).await;
-
                                     let _ = stream.write_all(b"$-1\r\n").await;
                                 }
                                 continue;
@@ -195,8 +197,8 @@ async fn handle_connection(
                         }
                         match &entry.value {
                             crate::engine::DataType::String(val) => {
-                                let response = format!("${}\r\n{}\r\n", val.len(), val);
-                                let _ = stream.write_all(response.as_bytes()).await;
+                                // Zero-copy: write header then stored bytes directly
+                                write_bulk!(stream, val);
                             }
                             _ => {
                                 let _ = stream.write_all(
@@ -215,8 +217,7 @@ async fn handle_connection(
                 let not_there = map.remove(&key).is_some();
 
                 if not_there {
-                    // OPTIMIZED: Async channel log for explicit deletes
-                    let log = format!("DEL {}\n", key);
+                    let log = format!("DEL {}\n", bytes_to_str(&key));
                     let _ = db.aof_tx.send(log).await;
                     let _ = stream.write_all(b":1\r\n").await;
                 } else {
@@ -239,9 +240,9 @@ async fn handle_connection(
                     Some(entry) => {
                         match &entry.value {
                             crate::engine::DataType::String(val) => {
-                                match val.parse::<i64>() {
-                                    Ok(num) => num,
-                                    Err(_) => {
+                                match std::str::from_utf8(val).ok().and_then(|s| s.parse::<i64>().ok()) {
+                                    Some(num) => num,
+                                    None => {
                                         if let Err(e) = stream.write_all(
                                                 b"-ERR Value is not an integer or out of range\r\n"
                                             ).await
@@ -265,48 +266,48 @@ async fn handle_connection(
                 };
                 let new_num = current_number + 1;
                 let new_entry = Entry {
-                    value: crate::engine::DataType::String(new_num.to_string()),
+                    // Bytes::from(String) is zero-copy — takes ownership of the String buffer
+                    value: crate::engine::DataType::String(Bytes::from(new_num.to_string())),
                     expires_at: None,
                 };
-                map.insert(key.clone(), new_entry);
+                map.insert(key.clone(), new_entry); // O(1)
 
-                // OPTIMIZED: Async channel log for value increments
-                let log = format!("INCR {}\n", key);
+                let log = format!("INCR {}\n", bytes_to_str(&key));
                 let _ = db.aof_tx.send(log).await;
 
                 let response = format!(":{}\r\n", new_num);
                 let _ = stream.write_all(response.as_bytes()).await;
             }
             Command::Publish(channel, message) => {
-                crate::pubsub::handle_publish(&pubsub, &channel, &message, &mut stream).await;
+                crate::pubsub::handle_publish(&pubsub, bytes_to_str(&channel), bytes_to_str(&message), &mut stream).await;
             }
             Command::Subscribe(channel) => {
-                crate::pubsub::handle_subscribe(&pubsub, &channel, &mut stream, &mut reader).await;
+                crate::pubsub::handle_subscribe(&pubsub, bytes_to_str(&channel), &mut stream, &mut reader).await;
                 break;
             }
             Command::Unsubscribe(channel) => {
+                let ch = bytes_to_str(&channel);
                 let ack = format!(
                     "*3\r\n$11\r\nunsubscribe\r\n${}\r\n{}\r\n:0\r\n",
                     channel.len(),
-                    channel
+                    ch
                 );
                 let _ = stream.write_all(ack.as_bytes()).await;
             }
             Command::LPush(key, value) => {
                 let mut map = db.write_shard(&key).await;
 
-                let entry = map.entry(key.clone()).or_insert_with(|| Entry {
+                let entry = map.entry(key.clone()).or_insert_with(|| Entry { // O(1)
                     value: crate::engine::DataType::List(std::collections::VecDeque::new()),
                     expires_at: None,
                 });
 
                 match &mut entry.value {
                     crate::engine::DataType::List(list) => {
-                        list.push_front(value.clone());
+                        list.push_front(value.clone()); // O(1)
                         let len = list.len();
 
-                        // OPTIMIZED: Shifting LPush logs to the async channel memory buffer
-                        let log = format!("LPUSH {} \"{}\"\n", key, value);
+                        let log = format!("LPUSH {} \"{}\"\n", bytes_to_str(&key), bytes_to_str(&value));
                         let _ = db.aof_tx.send(log).await;
 
                         let response = format!(":{}\r\n", len);
@@ -326,12 +327,9 @@ async fn handle_connection(
                     match &mut entry.value {
                         crate::engine::DataType::List(list) => {
                             if let Some(val) = list.pop_front() {
-                                // OPTIMIZED: Shifting LPop logs to the async channel memory buffer
-                                let log = format!("LPOP {}\n", key);
+                                let log = format!("LPOP {}\n", bytes_to_str(&key));
                                 let _ = db.aof_tx.send(log).await;
-
-                                let response = format!("${}\r\n{}\r\n", val.len(), val);
-                                let _ = stream.write_all(response.as_bytes()).await;
+                                write_bulk!(stream, val);
                             } else {
                                 let _ = stream.write_all(b"$-1\r\n").await;
                             }
@@ -353,12 +351,9 @@ async fn handle_connection(
                     match &mut entry.value {
                         crate::engine::DataType::List(list) => {
                             if let Some(val) = list.pop_back() {
-                                // OPTIMIZED: Shifting RPop logs to the async channel memory buffer
-                                let log = format!("RPOP {}\n", key);
+                                let log = format!("RPOP {}\n", bytes_to_str(&key));
                                 let _ = db.aof_tx.send(log).await;
-
-                                let response = format!("${}\r\n{}\r\n", val.len(), val);
-                                let _ = stream.write_all(response.as_bytes()).await;
+                                write_bulk!(stream, val);
                             } else {
                                 let _ = stream.write_all(b"$-1\r\n").await;
                             }
@@ -402,8 +397,7 @@ async fn handle_connection(
                                 }
                             }
 
-                            // OPTIMIZED: Shifting LTrim logs to the async channel memory buffer
-                            let log = format!("LTRIM {} {} {}\n", key, start, stop);
+                            let log = format!("LTRIM {} {} {}\n", bytes_to_str(&key), start, stop);
                             let _ = db.aof_tx.send(log).await;
 
                             let _ = stream.write_all(b"+OK\r\n").await;
@@ -435,15 +429,18 @@ async fn handle_connection(
                                 let s = std::cmp::max(0, s) as usize;
                                 let e = std::cmp::min(e, len - 1) as usize;
 
-                                let mut response = format!("*{}\r\n", e - s + 1);
+                                // Build response into a Vec<u8> — no intermediate String per element
+                                let count = e - s + 1;
+                                let mut response = Vec::with_capacity(count * 32);
+                                write!(response, "*{}\r\n", count).unwrap();
                                 for i in s..=e {
                                     if let Some(val) = list.get(i) {
-                                        response.push_str(
-                                            &format!("${}\r\n{}\r\n", val.len(), val)
-                                        );
+                                        write!(response, "${}\r\n", val.len()).unwrap();
+                                        response.extend_from_slice(val);
+                                        response.extend_from_slice(b"\r\n");
                                     }
                                 }
-                                let _ = stream.write_all(response.as_bytes()).await;
+                                let _ = stream.write_all(&response).await;
                             }
                         }
                         _ => {
@@ -458,17 +455,16 @@ async fn handle_connection(
             }
             Command::RPush(key, value) => {
                 let mut map = db.write_shard(&key).await;
-                let entry = map.entry(key.clone()).or_insert_with(|| Entry {
+                let entry = map.entry(key.clone()).or_insert_with(|| Entry { // O(1)
                     value: crate::engine::DataType::List(std::collections::VecDeque::new()),
                     expires_at: None,
                 });
 
                 if let crate::engine::DataType::List(list) = &mut entry.value {
-                    list.push_back(value.clone());
+                    list.push_back(value.clone()); // O(1)
                     let len = list.len();
 
-                    // OPTIMIZED: Shifting RPush logs to the async channel memory buffer
-                    let log = format!("RPUSH {} \"{}\"\n", key, value);
+                    let log = format!("RPUSH {} \"{}\"\n", bytes_to_str(&key), bytes_to_str(&value));
                     let _ = db.aof_tx.send(log).await;
 
                     let response = format!(":{}\r\n", len);
@@ -477,19 +473,18 @@ async fn handle_connection(
             }
             Command::HSet(key, field, value) => {
                 let mut map = db.write_shard(&key).await;
-                let entry = map.entry(key.clone()).or_insert_with(|| Entry {
+                let entry = map.entry(key.clone()).or_insert_with(|| Entry { // O(1)
                     value: crate::engine::DataType::Hash(std::collections::HashMap::new()),
                     expires_at: None,
                 });
                 if let crate::engine::DataType::Hash(hmap) = &mut entry.value {
-                    hmap.insert(field.clone(), value.clone());
-                    
-                    // OPTIMIZED: Shifting HSet logs to the async channel memory buffer
-                    let log = format!("HSET {} {} \"{}\"\n", key, field, value);
+                    hmap.insert(field.clone(), value.clone()); // O(1) each
+
+                    let log = format!("HSET {} {} \"{}\"\n",
+                        bytes_to_str(&key), bytes_to_str(&field), bytes_to_str(&value));
                     let _ = db.aof_tx.send(log).await;
 
-                    let response = format!("+OK\r\n");
-                    let _ = stream.write_all(response.as_bytes()).await;
+                    let _ = stream.write_all(b"+OK\r\n").await;
                 } else {
                     let _ = stream.write_all(b"-WRONGTYPE\r\n").await;
                 }
@@ -498,13 +493,17 @@ async fn handle_connection(
                 let map = db.read_shard(&key).await;
                 if let Some(entry) = map.get(&key) {
                     if let crate::engine::DataType::Hash(hmap) = &entry.value {
-                        let mut response = format!("*{}\r\n", hmap.len() * 2);
+                        let mut response = Vec::with_capacity(hmap.len() * 64);
+                        write!(response, "*{}\r\n", hmap.len() * 2).unwrap();
                         for (f, v) in hmap {
-                            response.push_str(
-                                &format!("${}\r\n{}\r\n${}\r\n{}\r\n", f.len(), f, v.len(), v)
-                            );
+                            write!(response, "${}\r\n", f.len()).unwrap();
+                            response.extend_from_slice(f);
+                            response.extend_from_slice(b"\r\n");
+                            write!(response, "${}\r\n", v.len()).unwrap();
+                            response.extend_from_slice(v);
+                            response.extend_from_slice(b"\r\n");
                         }
-                        let _ = stream.write_all(response.as_bytes()).await;
+                        let _ = stream.write_all(&response).await;
                     } else {
                         let _ = stream.write_all(b"-WRONGTYPE\r\n").await;
                     }
@@ -518,8 +517,7 @@ async fn handle_connection(
                     if let crate::engine::DataType::Hash(hmap) = &entry.value {
                         match hmap.get(&field) {
                             Some(val) => {
-                                let response = format!("${}\r\n{}\r\n", val.len(), val);
-                                let _ = stream.write_all(response.as_bytes()).await;
+                                write_bulk!(stream, val);
                             }
                             None => {
                                 let _ = stream.write_all(b"$-1\r\n").await;
@@ -545,7 +543,7 @@ async fn handle_connection(
 
                         if let Some(val) = &popped_val {
                             let dest_entry = shard
-                                .entry(destination.clone())
+                                .entry(destination.clone()) // O(1)
                                 .or_insert_with(|| Entry {
                                     value: engine::DataType::List(
                                         std::collections::VecDeque::new()
@@ -553,7 +551,7 @@ async fn handle_connection(
                                     expires_at: None,
                                 });
                             if let engine::DataType::List(dest_list) = &mut dest_entry.value {
-                                dest_list.push_front(val.clone());
+                                dest_list.push_front(val.clone()); // O(1)
                             }
                         }
                     }
@@ -567,7 +565,7 @@ async fn handle_connection(
 
                         if let Some(val) = &popped_val {
                             let dest_entry = shard_dest
-                                .entry(destination.clone())
+                                .entry(destination.clone()) // O(1)
                                 .or_insert_with(|| Entry {
                                     value: engine::DataType::List(
                                         std::collections::VecDeque::new()
@@ -575,7 +573,7 @@ async fn handle_connection(
                                     expires_at: None,
                                 });
                             if let engine::DataType::List(dest_list) = &mut dest_entry.value {
-                                dest_list.push_front(val.clone());
+                                dest_list.push_front(val.clone()); // O(1)
                             }
                         }
                     }
@@ -583,12 +581,10 @@ async fn handle_connection(
 
                 match popped_val {
                     Some(val) => {
-                        // OPTIMIZED: Removed OpenOptions. Send log safely via memory channel.
-                        let log = format!("RPOPLPUSH {} {}\n", source, destination);
+                        let log = format!("RPOPLPUSH {} {}\n",
+                            bytes_to_str(&source), bytes_to_str(&destination));
                         let _ = db.aof_tx.send(log).await;
-                        
-                        let response = format!("${}\r\n{}\r\n", val.len(), val);
-                        let _ = stream.write_all(response.as_bytes()).await;
+                        write_bulk!(stream, val);
                     }
                     None => {
                         let _ = stream.write_all(b"$-1\r\n").await;
@@ -609,29 +605,28 @@ async fn handle_connection(
                 }
 
                 if removed {
-                    // OPTIMIZED: No more file descriptor unpacking or unwrap() panics here!
-                    let log = format!("LREM {} 1 \"{}\"\n", key, value_to_remove);
+                    let log = format!("LREM {} 1 \"{}\"\n",
+                        bytes_to_str(&key), bytes_to_str(&value_to_remove));
                     let _ = db.aof_tx.send(log).await;
-
                     let _ = stream.write_all(b":1\r\n").await;
                 } else {
                     let _ = stream.write_all(b":0\r\n").await;
                 }
             }
             Command::MGet(key_a, key_b) => {
-                let mut val_a = None;
-                let mut val_b = None;
+                let mut val_a: Option<Bytes> = None;
+                let mut val_b: Option<Bytes> = None;
 
                 match db.read_multi_shards(&key_a, &key_b).await {
                     MultiReadGuard::Single(shard) => {
                         if let Some(entry) = shard.get(&key_a) {
                             if let crate::engine::DataType::String(s) = &entry.value {
-                                val_a = Some(s.clone());
+                                val_a = Some(s.clone()); // O(1)
                             }
                         }
                         if let Some(entry) = shard.get(&key_b) {
                             if let crate::engine::DataType::String(s) = &entry.value {
-                                val_b = Some(s.clone());
+                                val_b = Some(s.clone()); // O(1)
                             }
                         }
                     }
@@ -639,43 +634,44 @@ async fn handle_connection(
                     MultiReadGuard::Double(shard_a, shard_b) => {
                         if let Some(entry) = shard_a.get(&key_a) {
                             if let crate::engine::DataType::String(s) = &entry.value {
-                                val_a = Some(s.clone());
+                                val_a = Some(s.clone()); // O(1)
                             }
                         }
                         if let Some(entry) = shard_b.get(&key_b) {
                             if let crate::engine::DataType::String(s) = &entry.value {
-                                val_b = Some(s.clone());
+                                val_b = Some(s.clone()); // O(1)
                             }
                         }
                     }
                 }
 
-                let mut response = format!("*2\r\n");
-
+                let mut response = Vec::with_capacity(64);
+                response.extend_from_slice(b"*2\r\n");
                 for val in &[val_a, val_b] {
                     match val {
-                        Some(s) => response.push_str(&format!("${}\r\n{}\r\n", s.len(), s)),
-                        None => response.push_str("$-1\r\n"),
+                        Some(s) => {
+                            write!(response, "${}\r\n", s.len()).unwrap();
+                            response.extend_from_slice(s);
+                            response.extend_from_slice(b"\r\n");
+                        }
+                        None => response.extend_from_slice(b"$-1\r\n"),
                     }
                 }
-
-                let _ = stream.write_all(response.as_bytes()).await;
+                let _ = stream.write_all(&response).await;
             }
             Command::SAdd(key, member) => {
                 let mut shard = db.write_shard(&key).await;
                 let mut added = 0;
 
-                let entry = shard.entry(key.clone()).or_insert_with(|| crate::engine::Entry {
+                let entry = shard.entry(key.clone()).or_insert_with(|| crate::engine::Entry { // O(1)
                     value: crate::engine::DataType::Set(std::collections::HashSet::new()),
                     expires_at: None,
                 });
 
                 if let crate::engine::DataType::Set(set) = &mut entry.value {
-                    if set.insert(member.clone()) {
+                    if set.insert(member.clone()) { // O(1)
                         added = 1;
-
-                        // OPTIMIZED: Shifted blocking raw file write out to async writer channel
-                        let log = format!("SADD {} {}\n", key, member);
+                        let log = format!("SADD {} {}\n", bytes_to_str(&key), bytes_to_str(&member));
                         let _ = db.aof_tx.send(log).await;
                     }
                 }
@@ -683,14 +679,14 @@ async fn handle_connection(
                 let _ = stream.write_all(format!(":{}\r\n", added).as_bytes()).await;
             }
             Command::SInter(key_a, key_b) => {
-                let mut set_a = std::collections::HashSet::new();
-                let mut set_b = std::collections::HashSet::new();
+                let mut set_a = std::collections::HashSet::<Bytes>::new();
+                let mut set_b = std::collections::HashSet::<Bytes>::new();
 
                 match db.read_multi_shards(&key_a, &key_b).await {
                     MultiReadGuard::Single(shard) => {
                         if let Some(e) = shard.get(&key_a) {
                             if let crate::engine::DataType::Set(s) = &e.value {
-                                set_a = s.clone();
+                                set_a = s.clone(); // HashSet clone — each Bytes element is O(1)
                             }
                         }
                         if let Some(e) = shard.get(&key_b) {
@@ -713,21 +709,23 @@ async fn handle_connection(
                     }
                 }
 
-                let intersection: Vec<&String> = set_a
+                let intersection: Vec<&Bytes> = set_a
                     .iter()
                     .filter(|item| set_b.contains(*item))
                     .collect();
 
-                let mut response = format!("*{}\r\n", intersection.len());
-
+                let mut response = Vec::with_capacity(intersection.len() * 32);
+                write!(response, "*{}\r\n", intersection.len()).unwrap();
                 for item in intersection {
-                    response.push_str(&format!("${}\r\n{}\r\n", item.len(), item));
+                    write!(response, "${}\r\n", item.len()).unwrap();
+                    response.extend_from_slice(item);
+                    response.extend_from_slice(b"\r\n");
                 }
-
-                let _ = stream.write_all(response.as_bytes()).await;
+                let _ = stream.write_all(&response).await;
             }
             Command::Keys(pattern) => {
-                let regex_string = format!("^{}$", pattern.replace("*", ".*").replace("?", "."));
+                let pattern_str = bytes_to_str(&pattern);
+                let regex_string = format!("^{}$", pattern_str.replace("*", ".*").replace("?", "."));
 
                 let matcher = match regex::Regex::new(&regex_string) {
                     Ok(re) => re,
@@ -739,18 +737,21 @@ async fn handle_connection(
 
                 let all_keys = db.get_all_keys().await;
 
-                let filtered_keys: Vec<String> = all_keys
+                let filtered_keys: Vec<Bytes> = all_keys
                     .into_iter()
-                    .filter(|key| matcher.is_match(key))
+                    .filter(|key| {
+                        std::str::from_utf8(key).map(|s| matcher.is_match(s)).unwrap_or(false)
+                    })
                     .collect();
 
-                let mut response = format!("*{}\r\n", filtered_keys.len());
-
-                for key in filtered_keys {
-                    response.push_str(&format!("${}\r\n{}\r\n", key.len(), key));
+                let mut response = Vec::with_capacity(filtered_keys.len() * 32);
+                write!(response, "*{}\r\n", filtered_keys.len()).unwrap();
+                for key in &filtered_keys {
+                    write!(response, "${}\r\n", key.len()).unwrap();
+                    response.extend_from_slice(key);
+                    response.extend_from_slice(b"\r\n");
                 }
-
-                let _ = stream.write_all(response.as_bytes()).await;
+                let _ = stream.write_all(&response).await;
             }
             Command::Scan(cursor, match_pattern) => {
                 if cursor >= 64 {
@@ -761,30 +762,30 @@ async fn handle_connection(
                 let mut keys = db.scan_shard(cursor).await;
 
                 if let Some(pattern) = match_pattern {
+                    let pattern_str = bytes_to_str(&pattern);
                     let regex_string = format!(
                         "^{}$",
-                        pattern.replace("*", ".*").replace("?", ".")
+                        pattern_str.replace("*", ".*").replace("?", ".")
                     );
                     if let Ok(matcher) = regex::Regex::new(&regex_string) {
-                        keys.retain(|key| matcher.is_match(key));
+                        keys.retain(|key| {
+                            std::str::from_utf8(key).map(|s| matcher.is_match(s)).unwrap_or(false)
+                        });
                     }
                 }
 
                 let next_cursor = if cursor == 63 { 0 } else { cursor + 1 };
                 let next_cursor_str = next_cursor.to_string();
 
-                let mut response = format!(
-                    "*2\r\n${}\r\n{}\r\n*{}\r\n",
-                    next_cursor_str.len(),
-                    next_cursor_str,
-                    keys.len()
-                );
-
-                for key in keys {
-                    response.push_str(&format!("${}\r\n{}\r\n", key.len(), key));
+                let mut response = Vec::with_capacity(keys.len() * 32 + 32);
+                write!(response, "*2\r\n${}\r\n{}\r\n*{}\r\n",
+                    next_cursor_str.len(), next_cursor_str, keys.len()).unwrap();
+                for key in &keys {
+                    write!(response, "${}\r\n", key.len()).unwrap();
+                    response.extend_from_slice(key);
+                    response.extend_from_slice(b"\r\n");
                 }
-
-                let _ = stream.write_all(response.as_bytes()).await;
+                let _ = stream.write_all(&response).await;
             }
             Command::Monitor => {
                 let _ = stream.write_all(b"+OK\r\n").await;
@@ -822,12 +823,12 @@ async fn handle_connection(
                             if let Ok(duration) = expiration.duration_since(std::time::SystemTime::now()) {
                                 format!(":{}\r\n", duration.as_secs())
                             } else {
-                                ":-2\r\n".to_string() // Already expired
+                                ":-2\r\n".to_string()
                             }
                         }
-                        None => ":-1\r\n".to_string(), // Key exists but has no associated expire
+                        None => ":-1\r\n".to_string(),
                     },
-                    None => ":-2\r\n".to_string(), // Key does not exist
+                    None => ":-2\r\n".to_string(),
                 };
                 let _ = stream.write_all(reply.as_bytes()).await;
             }
@@ -850,19 +851,18 @@ async fn handle_connection(
                     Some(entry) => match entry.expires_at {
                         Some(expiration) => {
                             if let Ok(duration) = expiration.duration_since(SystemTime::now()) {
-                                format!(":{}\r\n", duration.as_millis()) // Return MS precision TTL
+                                format!(":{}\r\n", duration.as_millis())
                             } else {
-                                ":-2\r\n".to_string() // Expired
+                                ":-2\r\n".to_string()
                             }
                         }
-                        None => ":-1\r\n".to_string(), // No expiration set
+                        None => ":-1\r\n".to_string(),
                     },
-                    None => ":-2\r\n".to_string(), // Key doesn't exist
+                    None => ":-2\r\n".to_string(),
                 };
                 let _ = stream.write_all(reply.as_bytes()).await;
             }
             Command::Memory => {
-                // Tiny RDM uses MEMORY USAGE to show bytes. Let's return a stable mock size
                 let _ = stream.write_all(b":64\r\n").await;
             }
             Command::Llen(key) => {
@@ -903,11 +903,14 @@ async fn handle_connection(
                 match map.get(&key) {
                     Some(entry) => match &entry.value {
                         crate::engine::DataType::Set(set) => {
-                            let mut response = format!("*{}\r\n", set.len());
+                            let mut response = Vec::with_capacity(set.len() * 32);
+                            write!(response, "*{}\r\n", set.len()).unwrap();
                             for member in set {
-                                response.push_str(&format!("${}\r\n{}\r\n", member.len(), member));
+                                write!(response, "${}\r\n", member.len()).unwrap();
+                                response.extend_from_slice(member);
+                                response.extend_from_slice(b"\r\n");
                             }
-                            let _ = stream.write_all(response.as_bytes()).await;
+                            let _ = stream.write_all(&response).await;
                         }
                         _ => {
                             let _ = stream.write_all(b"-WRONGTYPE Operation against a key holding the wrong kind of value\r\n").await;
@@ -932,19 +935,17 @@ pub async fn run(address: &str, db: Db, pubsub: PubSub) {
     let listener = TcpListener::bind(address).await.expect("Could not bind to address");
     crate::log_success!("Server", "Titan KV natively deployed and listening on {}", address);
 
-    // Dynamic central state registry tracking active connections across thread pools
     let active_clients = Arc::new(Mutex::new(HashMap::new()));
 
     loop {
         match listener.accept().await {
             Ok((stream, socket_addr)) => {
                 crate::log_info!("Server", "New connection from {}", socket_addr);
-                    
+
                 let db_handle = db.clone();
                 let pubsub_handle = Arc::clone(&pubsub);
                 let clients_handle = active_clients.clone();
 
-                    // Generate tracking meta context and save it prior to worker spawning
                 let client_id = NEXT_CLIENT_ID.fetch_add(1, Ordering::Relaxed);
                 {
                     let mut clients = active_clients.lock().unwrap();

@@ -367,6 +367,7 @@ dependencies = [
 name = "titan_kv"
 version = "2.1.0"
 dependencies = [
+ "bytes",
  "chrono",
  "colored",
  "regex",
