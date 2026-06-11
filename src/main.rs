@@ -14,11 +14,43 @@ use bytes::Bytes;
 use crate::engine::{DataType, Entry, Db};
 use crate::protocol::{parse_command, Command};
 
-#[tokio::main]
-async fn main() {
+fn main() {
     #[cfg(windows)]
     let _ = colored::control::set_virtual_terminal(true);
 
+    let args: Vec<String> = std::env::args().collect();
+    let is_single_threaded = args.contains(&"--s-t".to_string());
+
+    if is_single_threaded {
+        crate::log_warn!("System", "Launching Titan KV in dedication SINGLE-THREADED mode.");
+
+        if let Some(core_ids) = core_affinity::get_core_ids() {
+            if let Some(first_core) = core_ids.first() {
+                if core_affinity::set_for_current(*first_core) {
+                    crate::log_success!("System", "Core Pinning Successful: Thread locked to CPU Core 0.");
+                }
+            }
+        }
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("Failed to initialize single-threaded runtime");
+
+        runtime.block_on(async_main());
+    } else {
+        crate::log_info!("System", "Launching Titan KV in standard MULTI-THREADED mode.");
+
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("Failed to initialize multi-threaded runtime");
+
+        runtime.block_on(async_main());
+    }
+}
+
+async fn async_main() {
     let (db, aof_rx) = engine::new_db();
 
     replay_aof(&db).await;
@@ -27,16 +59,15 @@ async fn main() {
     start_expiration_sweeper(db.clone());
     start_aof_compactor(db.clone());
 
-    let address = "127.0.0.1:6379";
+    let address = std::env::var("ADDR").unwrap_or_else(|_| "127.0.0.1:6379".to_string());
     let pubsub = pubsub::new_pubsub();
-    server::run(address, db, pubsub).await;
+    server::run(&address, db, pubsub).await;
 }
 
 fn bstr(b: &[u8]) -> &str {
     std::str::from_utf8(b).unwrap_or("")
 }
 
-/// Asynchronously streams and parses the Append Only File to rebuild memory state.
 async fn replay_aof(db: &Db) {
     if let Ok(file) = File::open("database.aof").await {
         let reader = BufReader::new(file);
@@ -156,7 +187,6 @@ async fn replay_aof(db: &Db) {
     }
 }
 
-/// Spawns a background worker to aggressively sweep expired keys every 10 seconds.
 fn start_expiration_sweeper(db: Db) {
     tokio::spawn(async move {
         loop {
@@ -172,8 +202,8 @@ fn start_expiration_sweeper(db: Db) {
                 for (key, entry) in map.iter() {
                     if let Some(expiration) = entry.expires_at {
                         if now > expiration {
-                            shard_keys_to_del.push(key.clone()); // O(1)
-                            all_keys_to_del.push(key.clone());   // O(1)
+                            shard_keys_to_del.push(key.clone());
+                            all_keys_to_del.push(key.clone());
                         }
                     }
                 }
@@ -200,7 +230,6 @@ fn start_expiration_sweeper(db: Db) {
     });
 }
 
-/// Spawns a background worker to compact the AOF file every 60 seconds, reducing disk footprint.
 fn start_aof_compactor(db: Db) {
     tokio::spawn(async move {
         loop {

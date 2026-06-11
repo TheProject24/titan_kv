@@ -1,3 +1,4 @@
 /target
 database.aof
 *.aof
+database.aof

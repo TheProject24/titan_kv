@@ -1,6 +1,6 @@
 [package]
 name = "titan_kv"
-version = "2.1.0"
+version = "3.0.0"
 edition = "2024"
 
 [dependencies]
@@ -9,3 +9,4 @@ chrono = "0.4.44"
 colored = "3.1.1"
 tokio = { version = "1.52.1", features = ["full"] }
 regex = "1.10"
+core_affinity = "0.8"
