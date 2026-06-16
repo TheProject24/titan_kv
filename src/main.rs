@@ -69,7 +69,7 @@ async fn async_main(config: Config) {
     crate::log_info!("System", "Listening on {}", address);
 
     let pubsub = pubsub::new_pubsub();
-    server::run(&address, db, pubsub).await;
+    server::run(&address, db, pubsub, config).await;
 }
 
 fn bstr(b: &[u8]) -> &str {
