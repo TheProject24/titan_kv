@@ -1,3 +1,6 @@
 LPUSH jobs:processing "{submission_id:test-uuid-1111}"
 LPUSH jobs:processing "{submission_id:test-uuid-1111}"
 LPUSH jobs:processing "{submission_id:test-uuid-1111}"
+SET date "9/4/5"
+SET KEY "value"
+SET key "value"

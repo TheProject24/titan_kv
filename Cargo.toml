@@ -10,3 +10,4 @@ colored = "3.1.1"
 tokio = { version = "1.52.1", features = ["full"] }
 regex = "1.10"
 core_affinity = "0.8"
+clap = { version = "4.4", features = ["derive", "env"] }

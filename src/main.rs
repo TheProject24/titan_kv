@@ -3,6 +3,7 @@
 mod server;
 mod protocol;
 mod engine;
+pub mod config;
 pub mod logger;
 pub mod thread_pool;
 mod pubsub;
@@ -13,15 +14,19 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use bytes::Bytes;
 use crate::engine::{DataType, Entry, Db};
 use crate::protocol::{parse_command, Command};
+use config::Config;
+use clap::Parser;
 
 fn main() {
     #[cfg(windows)]
     let _ = colored::control::set_virtual_terminal(true);
 
-    let args: Vec<String> = std::env::args().collect();
-    let is_single_threaded = args.contains(&"--s-t".to_string());
+    let config = Config::parse();
 
-    if is_single_threaded {
+    // let args: Vec<String> = std::env::args().collect();
+    // let is_single_threaded = args.contains(&"--s-t".to_string());
+
+    if config.single_thread {
         crate::log_warn!("System", "Launching Titan KV in dedication SINGLE-THREADED mode.");
 
         if let Some(core_ids) = core_affinity::get_core_ids() {
@@ -37,7 +42,7 @@ fn main() {
             .build()
             .expect("Failed to initialize single-threaded runtime");
 
-        runtime.block_on(async_main());
+        runtime.block_on(async_main(config));
     } else {
         crate::log_info!("System", "Launching Titan KV in standard MULTI-THREADED mode.");
 
@@ -46,11 +51,11 @@ fn main() {
             .build()
             .expect("Failed to initialize multi-threaded runtime");
 
-        runtime.block_on(async_main());
+        runtime.block_on(async_main(config));
     }
 }
 
-async fn async_main() {
+async fn async_main(config: Config) {
     let (db, aof_rx) = engine::new_db();
 
     replay_aof(&db).await;
@@ -59,7 +64,10 @@ async fn async_main() {
     start_expiration_sweeper(db.clone());
     start_aof_compactor(db.clone());
 
-    let address = std::env::var("ADDR").unwrap_or_else(|_| "127.0.0.1:6379".to_string());
+    // let address = std::env::var("ADDR").unwrap_or_else(|_| "127.0.0.1:6379".to_string());
+    let address = format!("{}:{}", config.host, config.port);
+    crate::log_info!("System", "Listening on {}", address);
+
     let pubsub = pubsub::new_pubsub();
     server::run(&address, db, pubsub).await;
 }

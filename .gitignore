@@ -2,3 +2,7 @@
 database.aof
 *.aof
 database.aof
+
+.vscode/
+.claude/
+.cargo/
