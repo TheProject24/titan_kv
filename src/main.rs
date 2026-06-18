@@ -37,7 +37,7 @@ fn main() {
         // We lock the entire process to CPU Core 0 using core_affinity.
         // This eliminates the "Context Switching" overhead and "CPU Cache Thrashes" 
         // that occur when the OS moves threads between different physically cores.
-        crate::log_warn!("System", "Launching Titan KV in dedication SINGLE-THREADED mode.");
+        crate::log_warn!("System", "Launching Titan KV in dedicated SINGLE-THREADED mode.");
 
         if let Some(core_ids) = core_affinity::get_core_ids() {
             if let Some(first_core) = core_ids.first() {
