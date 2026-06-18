@@ -9,13 +9,14 @@
 
 <div align="center">
 
-**A Redis-compatible, in-memory key-value store — built from scratch in Rust.**
+**A Redis-compatible, in-memory key-value store — built from scratch in Rust, with sharding, AOF durability, pub/sub, and optional password auth.**
 
 [![Rust](https://img.shields.io/badge/Rust-2024_Edition-orange?style=flat-square&logo=rust)](https://www.rust-lang.org/)
 [![Tokio](https://img.shields.io/badge/Async-Tokio-purple?style=flat-square)](https://tokio.rs/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?style=flat-square&logo=docker&logoColor=white)](Dockerfile)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](LICENSE)
 [![Status](https://img.shields.io/badge/Status-Active_Development-brightgreen?style=flat-square)]()
+[![Version](https://img.shields.io/badge/Version-3.0.0-blue?style=flat-square)]()
 
 </div>
 
@@ -25,9 +26,9 @@
 
 Titan KV is a ground-up implementation of a Redis-compatible key-value store written entirely in safe Rust. It is not a wrapper, a binding, or a port — it is an original engine built to understand and replicate the core mechanics that make Redis one of the most battle-tested data stores in existence.
 
-It speaks the Redis wire protocol on port `6379`, which means any Redis client — `redis-cli`, `nc`, your application's existing Redis library — can connect to it without modification.
+It speaks the Redis wire protocol on port `6379`, which means any Redis client — `redis-cli`, `nc`, your application's existing Redis library — can connect to it without modification. The server also supports optional password authentication via `AUTH` and `TITAN_REQUIRE_PASS`, plus a single-thread runtime mode for pinned, low-latency runs.
 
-The goal is not to beat Redis. The goal is to understand what it takes to build something like it: the concurrency model, the durability guarantees, the expiration mechanics, the persistence format. Every line of Titan KV exists as a deliberate engineering decision.
+The goal is not to beat Redis. The goal is to understand what it takes to build something like it: the concurrency model, the durability guarantees, the expiration mechanics, the persistence format, and the tradeoffs behind a sharded async design. Every line of Titan KV exists as a deliberate engineering decision.
 
 ---
 
@@ -107,9 +108,9 @@ Multi-element responses (HGETALL, LRANGE, SMEMBERS, KEYS, SCAN) are built direct
 
 ### `protocol.rs` — The Parser
 
-A complete RESP-compatible command reader and parser. `read_resp()` allocates each argument once from the network buffer as `Bytes::copy_from_slice()`. Every subsequent operation on that data — through `parse_command`, into the `Command` enum, into the shard `HashMap` — is a **O(1) reference-count clone**. No heap copy occurs after the initial read.
+A complete RESP-compatible command reader and parser. `read_resp()` allocates each argument once from the network buffer as `Bytes::copy_from_slice()`. Every subsequent operation on that data — through `parse_command`, into the `Command` enum, into the shard `HashMap` — is an **O(1) reference-count clone**. No heap copy occurs after the initial read.
 
-The strongly-typed `Command` enum carries `Bytes` fields for all string arguments, covering scalar types, lists, hashes, pubsub operations, and the queue primitives `RPOPLPUSH` and `LREM`.
+The strongly-typed `Command` enum carries `Bytes` fields for all string arguments, covering scalar types, lists, hashes, pubsub operations, and the queue primitives `RPOPLPUSH` and `LREM`, plus server commands like `CLIENT LIST`, `MONITOR`, `DBSIZE`, and `MEMORY USAGE`.
 
 ### `pubsub.rs` — Event Broker
 
@@ -126,6 +127,7 @@ Startup, background tasks, and server launch live here:
 1. **AOF Replay** — On boot, the existing `database.aof` is replayed line by line, routing each key to its correct shard to reconstruct in-memory state. The database is live again in milliseconds.
 2. **Active Expiration Sweeper** — A background task wakes every 10 seconds, iterates across all 64 shards, removes expired keys, and appends `DEL` entries to the AOF.
 3. **AOF Compaction** — Every 60 seconds, the current live state across all shards is serialized to a temporary file and atomically renamed over `database.aof`. This collapses redundant command history and keeps the log from growing unbounded.
+4. **Runtime Mode Selection** — `--single-thread` pins the process to the first available CPU core and runs a current-thread Tokio runtime; the default path uses the multi-thread scheduler.
 
 ### `thread_pool.rs` — The Handcrafted Executor
 
@@ -138,10 +140,11 @@ Before Tokio took over async dispatch, Titan KV shipped a fully hand-rolled OS t
 | Command            | Syntax                    | Response                   | Notes                                                  |
 | ------------------ | ------------------------- | -------------------------- | ------------------------------------------------------ |
 | **Keys / General** |                           |                            |                                                        |
+| `AUTH`             | `AUTH password`           | `+OK` / `-ERR`             | Enables authenticated access when `TITAN_REQUIRE_PASS` is set |
 | `PING`             | `PING`                    | `+PONG`                    | Connection health check                                |
 | `SET`              | `SET key value`           | `+OK`                      | Write to shard + AOF                                   |
 | `GET`              | `GET key`                 | `$<len>\r\n<val>` or `$-1` | Lazy expiry check on read                              |
-| `MGET`             | `MGET key1 key2 ...`      | `*<count>\r\n...`          | Get multiple keys                                      |
+| `MGET`             | `MGET key1 key2`          | `*2\r\n...`                | Get two string keys at once                            |
 | `DEL`              | `DEL key`                 | `:1` or `:0`               | Removes key from shard + AOF entry                     |
 | `EXISTS`           | `EXISTS key`              | `:1` or `:0`               | Read-only, acquires shard read guard                   |
 | `INCR`             | `INCR key`                | `:<new_value>` or `-ERR`   | Atomic integer increment within shard                  |
@@ -409,6 +412,14 @@ Tags: `bytes::Bytes` · `zero-copy` · `O(1) clone` · `Arc-backed ref-count`
 The global `RwLock` was replaced with a `ShardedDb` of 64 independent shards. Keys are hash-routed to their shard. Cross-shard operations (`RPOPLPUSH`) use ordered lock acquisition to prevent deadlock. Job queue primitives `RPOPLPUSH` and `LREM` added.
 
 Tags: `ShardedDb` · `RPOPLPUSH` · `LREM` · `deadlock-free`
+
+---
+
+### ✓ Auth and Runtime Modes — Shipped
+
+`AUTH` is wired into the connection state, with optional password enforcement via `TITAN_REQUIRE_PASS`. The server can also run in a dedicated single-thread mode for pinned deployments when `--single-thread` is enabled.
+
+Tags: `AUTH` · `TITAN_REQUIRE_PASS` · `single-thread` · `core-affinity`
 
 ---
 

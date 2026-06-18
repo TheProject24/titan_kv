@@ -411,7 +411,7 @@ footer span { color: var(--rust); }
 <nav class="sidebar" id="sb">
   <div class="sb-brand">
     <div class="sb-logo">TITAN KV</div>
-    <div class="sb-ver">v2.1.0 · Rust 2024 Edition</div>
+    <div class="sb-ver">v3.0.0 · Rust 2024 Edition</div>
     <div class="sb-badge">64 Shards · Zero-Copy</div>
   </div>
   <div class="sb-links">
@@ -454,7 +454,7 @@ footer span { color: var(--rust); }
     ██║   ██║   ██║   ██║  ██║██║ ╚████║    ██║  ██╗ ╚████╔╝
     ╚═╝   ╚═╝   ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═══╝    ╚═╝  ╚═╝  ╚═══╝</pre>
 
-    <p class="tagline">A <em>Redis-compatible</em>, in-memory key-value store — built from scratch in <em>Rust</em>.</p>
+    <p class="tagline">A <em>Redis-compatible</em>, in-memory key-value store — built from scratch in <em>Rust</em>, with sharding, AOF durability, pub/sub, and optional password auth.</p>
 
     <div class="badges">
       <span class="badge b-rust">  ⚙ Rust 2024 Edition</span>
@@ -473,7 +473,7 @@ footer span { color: var(--rust); }
     </div>
 
     <div class="stats fi">
-      <div><div class="stat-n">40</div><div class="stat-l">Commands</div></div>
+      <div><div class="stat-n">41</div><div class="stat-l">Commands</div></div>
       <div><div class="stat-n">64</div><div class="stat-l">Shards</div></div>
       <div><div class="stat-n">4</div> <div class="stat-l">Data Types</div></div>
       <div><div class="stat-n">~70k</div><div class="stat-l">Req/s (SET/GET)</div></div>
@@ -495,7 +495,7 @@ footer span { color: var(--rust); }
   </p>
   <p style="font-size:13.5px;color:var(--muted);line-height:1.8;max-width:700px;margin-bottom:18px;">
     It speaks the Redis wire protocol on port <code>6379</code>, which means any Redis client —
-    <code>redis-cli</code>, <code>nc</code>, your application's existing Redis library — can connect without modification.
+    <code>redis-cli</code>, <code>nc</code>, your application's existing Redis library — can connect without modification. The server also supports optional password authentication via <code>AUTH</code> and <code>TITAN_REQUIRE_PASS</code>, plus a single-thread runtime mode for pinned, low-latency runs.
   </p>
   <p style="font-size:13.5px;color:var(--muted);line-height:1.8;max-width:700px;">
     The engine now runs a <strong style="color:var(--text)">64-shard architecture</strong> — each key is hash-routed to one of 64 independent
@@ -512,8 +512,9 @@ footer span { color: var(--rust); }
   <h2 class="sec-title">Architecture</h2>
   <p class="sec-sub">
     Each client connection is an independent Tokio task. A <code>ShardedDb</code> of 64 independent
-    <code>RwLock</code> shards guards in-memory state. Three background tasks manage expiration, AOF logging,
-    and periodic compaction — each aware of the full shard array.
+    <code>RwLock</code> shards guards in-memory state. Background tasks manage lazy and active expiration,
+    AOF logging, and periodic compaction — each aware of the full shard array. The bootstrap path in
+    <code>main.rs</code> also chooses between multi-threaded and single-threaded Tokio runtimes based on config.
   </p>
 
   <div class="arch-wrap">
@@ -660,7 +661,7 @@ footer span { color: var(--rust); }
       <div class="card-icon ic-c">🌐</div>
       <div class="card-title">server.rs</div>
       <div class="card-file">The Listener</div>
-      <div class="card-body">A Tokio <code>TcpListener</code> accepts connections in a tight loop. Each accepted connection is handed off to <code>tokio::spawn</code>, giving every client its own lightweight async task. Manages RESP input, command dispatch against the sharded DB, AOF writes, and response serialization for all <strong style="color:var(--text)">40 commands</strong>. Thread-safety is strictly maintained by dropping <code>MutexGuard</code>s before async yields.</div>
+      <div class="card-body">A Tokio <code>TcpListener</code> accepts connections in a tight loop. Each accepted connection is handed off to <code>tokio::spawn</code>, giving every client its own lightweight async task. Manages RESP input, command dispatch against the sharded DB, AOF writes, and response serialization for all <strong style="color:var(--text)">41 commands</strong>. Thread-safety is strictly maintained by dropping <code>MutexGuard</code>s before async yields.</div>
     </div>
     <div class="card">
       <div class="card-icon ic-p">⟨/⟩</div>
@@ -754,10 +755,10 @@ footer span { color: var(--rust); }
 <section id="commands" class="fi">
   <div class="sec-num">05 / Reference</div>
   <h2 class="sec-title">Command Reference</h2>
-  <p class="sec-sub">21 commands across 4 categories. All follow the Redis RESP protocol — connect with any existing Redis client, unchanged.</p>
+  <p class="sec-sub">41 commands across 6 categories. All follow the Redis RESP protocol — connect with any existing Redis client, unchanged.</p>
 
   <div class="cmd-tabs">
-    <button class="cmd-tab on"  data-cat="all">All (40)</button>
+    <button class="cmd-tab on"  data-cat="all">All (41)</button>
     <button class="cmd-tab"     data-cat="keys">Keys / General</button>
     <button class="cmd-tab"     data-cat="lists">Lists</button>
     <button class="cmd-tab"     data-cat="hashes">Hashes</button>
@@ -770,10 +771,11 @@ footer span { color: var(--rust); }
     <table class="cmd-table">
       <thead><tr><th>Command</th><th>Syntax</th><th>Response</th><th>Notes</th></tr></thead>
       <tbody>
+        <tr class="cmd-row show" data-cat="keys">   <td><span class="cn">AUTH</span></td>         <td><span class="cs">AUTH password</span></td>                 <td><span class="cr">+OK / -ERR</span></td>                     <td><span class="cn2">Enables authenticated access when <code>TITAN_REQUIRE_PASS</code> is set</span></td></tr>
         <tr class="cmd-row show" data-cat="keys">   <td><span class="cn">PING</span></td>         <td><span class="cs">PING</span></td>                          <td><span class="cr">+PONG</span></td>                          <td><span class="cn2">Connection health check</span></td></tr>
         <tr class="cmd-row show" data-cat="keys">   <td><span class="cn">SET</span></td>          <td><span class="cs">SET key value</span></td>                 <td><span class="cr">+OK</span></td>                            <td><span class="cn2">Write to shard + AOF</span></td></tr>
         <tr class="cmd-row show" data-cat="keys">   <td><span class="cn">GET</span></td>          <td><span class="cs">GET key</span></td>                       <td><span class="cr">$&lt;len&gt;\r\n&lt;val&gt; or $-1</span></td><td><span class="cn2">Lazy expiry check on read</span></td></tr>
-        <tr class="cmd-row show" data-cat="keys">   <td><span class="cn">MGET</span><span class="cmd-new">NEW</span></td>        <td><span class="cs">MGET key1 key2 ...</span></td>                       <td><span class="cr">*&lt;count&gt;\r\n...</span></td><td><span class="cn2">Get multiple keys</span></td></tr>
+        <tr class="cmd-row show" data-cat="keys">   <td><span class="cn">MGET</span><span class="cmd-new">NEW</span></td>        <td><span class="cs">MGET key1 key2</span></td>                       <td><span class="cr">*2\r\n...</span></td><td><span class="cn2">Get two string keys at once</span></td></tr>
         <tr class="cmd-row show" data-cat="keys">   <td><span class="cn">DEL</span></td>          <td><span class="cs">DEL key</span></td>                       <td><span class="cr">:1 or :0</span></td>                        <td><span class="cn2">Removes key from shard + AOF entry</span></td></tr>
         <tr class="cmd-row show" data-cat="keys">   <td><span class="cn">EXISTS</span></td>       <td><span class="cs">EXISTS key</span></td>                    <td><span class="cr">:1 or :0</span></td>                        <td><span class="cn2">Read-only, acquires shard read guard</span></td></tr>
         <tr class="cmd-row show" data-cat="keys">   <td><span class="cn">INCR</span></td>         <td><span class="cs">INCR key</span></td>                      <td><span class="cr">:&lt;new_value&gt; or -ERR</span></td>       <td><span class="cn2">Atomic increment within shard</span></td></tr>
@@ -1071,7 +1073,7 @@ footer span { color: var(--rust); }
 
   <p style="font-size:13px;color:var(--muted);max-width:680px;line-height:1.8;">
     Under a uniform key distribution, write throughput scales linearly until hitting I/O or CPU limits — not the lock.
-    The <code>bytes::Bytes</code> migration (v2.1.0) reduced per-command heap allocations by 60–70%, pushing
+    The <code>bytes::Bytes</code> migration (v3.0.0) reduced per-command heap allocations by 60–70%, pushing
     throughput to <strong style="color:var(--text)">~70k req/s</strong> for SET, GET, and LPUSH at 50–65 concurrent clients.
   </p>
 

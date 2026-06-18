@@ -6,3 +6,4 @@ database.aof
 .vscode/
 .claude/
 .cargo/
+database.aof
