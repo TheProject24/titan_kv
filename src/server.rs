@@ -1,4 +1,8 @@
 // src/server.rs
+//! Titan KV Networking & Command Dispatch
+//! 
+//! This module handles TCP connections, RESP protocol parsing, 
+//! authentication states, and the high-level command execution loop.
 
 use crate::pubsub::{ PubSub };
 use std::io::Write as IoWrite;
@@ -17,20 +21,24 @@ use bytes::Bytes;
 use crate::config::Config;
 use subtle::ConstantTimeEq;
 
+/// Tracks if a connection has proven its identity via AUTH.
 #[derive(PartialEq)]
 enum ConnectionState {
     Unauthorized,
     Authenticated,
 }
 
+/// Metadata about a connected client for internal tracking.
 struct ClientInfo {
     id: u64,
     addr: SocketAddr,
     connected_at: SystemTime,
 }
 
+/// Monotonic ID counter for clients.
 static NEXT_CLIENT_ID: AtomicU64 = AtomicU64::new(1);
 
+/// RAII Guard that removes a client from the active client map when their connection drops.
 struct ClientGuard {
     addr: SocketAddr,
     clients: Arc<Mutex<HashMap<SocketAddr, ClientInfo>>>,
@@ -47,6 +55,7 @@ impl Drop for ClientGuard {
 use crate::engine::{ self, Db, Entry, MultiWriteGuard, MultiReadGuard };
 use crate::protocol::{ parse_command, Command, read_resp };
 
+/// DSL-like macro for writing RESP Bulk Strings ($<len>\r\n<data>\r\n) to the buffer.
 macro_rules! write_bulk {
     ($buffer:expr, $val:expr) => {{
         let header = format!("${}\r\n", $val.len());
@@ -56,10 +65,12 @@ macro_rules! write_bulk {
     }};
 }
 
+/// Helper for safe UTF-8 conversion in logs.
 fn bytes_to_str(b: &[u8]) -> &str {
     std::str::from_utf8(b).unwrap_or("")
 }
 
+/// The core connection handler. One task is spawned per TCP connection.
 async fn handle_connection(
     stream: TcpStream,
     db: Db,
@@ -68,23 +79,28 @@ async fn handle_connection(
     active_clients: Arc<Mutex<HashMap<SocketAddr, ClientInfo>>>,
     requirepass: Arc<Option<String>>
 ) {
+    // Ensure the client is unregistered when this future resolves (disconnect).
     let _guard = ClientGuard {
         addr: socket_addr,
         clients: active_clients.clone(),
     };
 
+    // Split the stream into read/write halves for concurrent I/O (required for PubSub).
     let (read_half, mut stream) = stream.into_split();
     let mut reader = BufReader::new(read_half);
 
+    // Initialize security state based on server config.
     let mut state = if requirepass.is_some() {
         ConnectionState::Unauthorized
     } else {
         ConnectionState::Authenticated
     };
 
+    // Reusable buffer to minimize allocations during response writing.
     let mut write_buffer = Vec::with_capacity(8192);
 
     loop {
+        // 1. RECV & PARSE RESP PACKET
         let parts: Vec<Bytes> = match read_resp(&mut reader).await {
             Ok(p) if !p.is_empty() => p,
             _ => {
@@ -95,6 +111,8 @@ async fn handle_connection(
 
         let command = parse_command(&parts);
 
+        // 2. LOGGING & MONITORING
+        // We log commands before execution for auditing, even if they fail auth.
         let summary_parts: Vec<String> = parts
             .iter()
             .map(|p| {
@@ -104,27 +122,27 @@ async fn handle_connection(
             .collect();
         crate::log_info!("Command", "{}", summary_parts.join(" "));
 
+        // Broadcast to all clients currently running the MONITOR command.
         if !parts.is_empty() && !parts[0].eq_ignore_ascii_case(b"MONITOR") {
             if let Ok(duration) = SystemTime::now().duration_since(UNIX_EPOCH) {
                 let timestamp = duration.as_secs_f64();
-
                 let cmd_string = parts
                     .iter()
                     .map(|p| format!("\"{}\"", bytes_to_str(p)))
                     .collect::<Vec<String>>()
                     .join(" ");
-
                 let log_msg = format!("{} [0 {}] {}", timestamp, socket_addr, cmd_string);
                 let _ = db.tx.send(log_msg);
             }
         }
 
+        // 3. SECURITY GATEWAY
         if state == ConnectionState::Unauthorized {
             match command {
                 Command::Auth(provided_password) => {
                     let actual_password = requirepass.as_deref().unwrap();
-
-                    // Security: Constant-time comparison
+                    // We use subtle::ConstantTimeEq to prevent timing attacks where 
+                    // an attacker guesses the password char-by-char.
                     if provided_password.as_bytes().ct_eq(actual_password.as_bytes()).into() {
                         state = ConnectionState::Authenticated;
                         write_buffer.extend_from_slice(b"+OK\r\n");
@@ -133,18 +151,16 @@ async fn handle_connection(
                     }
                 }
                 _ => {
-                    // Reject any database operation if not authenticated
                     write_buffer.extend_from_slice(b"-NOAUTH Authentication required.\r\n");
                 }
             }
 
-            // Flush the rejection/auth message immediately and wait for next command
             let _ = stream.write_all(&write_buffer).await;
             write_buffer.clear();
-            continue; 
+            continue; // Skip the database execution logic
         }
 
-        // 4. NORMAL EXECUTION BLOCK
+        // 4. MAIN COMMAND EXECUTION ENGINE
         match command {
             Command::Auth(_) => {
                 write_buffer.extend_from_slice(b"+OK\r\n");
@@ -152,7 +168,6 @@ async fn handle_connection(
             Command::ClientList => {
                 let mut buf = String::new();
                 let now = SystemTime::now();
-
                 {
                     let clients = active_clients.lock().unwrap();
                     for info in clients.values() {
@@ -184,86 +199,6 @@ async fn handle_connection(
                     total_keys += map.len();
                 }
                 write!(&mut write_buffer, ":{}\r\n", total_keys).unwrap();
-            }
-            Command::SetEx(key, seconds, value) => {
-                let expiration_time = SystemTime::now() + Duration::from_secs(seconds as u64);
-
-                let new_entry = Entry {
-                    value: crate::engine::DataType::String(value.clone()),
-                    expires_at: Some(expiration_time),
-                };
-
-                let mut map = db.write_shard(&key).await;
-                map.insert(key.clone(), new_entry);
-
-                let log = format!("SETEX {} {} {}\n", bytes_to_str(&key), seconds, bytes_to_str(&value));
-                let _ = db.aof_tx.send(log).await;
-
-                write_buffer.extend_from_slice(b"+OK\r\n");
-            }
-            Command::Ping => {
-                write_buffer.extend_from_slice(b"+PONG\r\n");
-            }
-            Command::Set(key, value) => {
-                let mut shard = db.write_shard(&key).await;
-
-                shard.insert(key.clone(), Entry {
-                    value: engine::DataType::String(value.clone()),
-                    expires_at: None,
-                });
-
-                let log = format!("SET {} {}\n", bytes_to_str(&key), bytes_to_str(&value));
-                let _ = db.aof_tx.send(log).await;
-
-                write_buffer.extend_from_slice(b"+OK\r\n");
-            }
-            Command::Get(key) => {
-                let mut map = db.write_shard(&key).await;
-                let mut expired = false;
-
-                if let Some(entry) = map.get(&key) {
-                    if let Some(expiration) = entry.expires_at {
-                        if SystemTime::now() > expiration {
-                            expired = true;
-                        }
-                    }
-                }
-
-                if expired {
-                    if map.remove(&key).is_some() {
-                        let log = format!("DEL {}\n", bytes_to_str(&key));
-                        let _ = db.aof_tx.send(log).await;
-                    }
-                    write_buffer.extend_from_slice(b"$-1\r\n");
-                } else {
-                    match map.get(&key) {
-                        Some(entry) => match &entry.value {
-                            crate::engine::DataType::String(val) => {
-                                write_bulk!(write_buffer, val);
-                            }
-                            _ => write_buffer.extend_from_slice(b"-WRONGTYPE Operation against a key holding the wrong type of value\r\n"),
-                        },
-                        None => write_buffer.extend_from_slice(b"$-1\r\n"),
-                    }
-                }
-            }
-            Command::Del(key) => {
-                let mut map = db.write_shard(&key).await;
-                if map.remove(&key).is_some() {
-                    let log = format!("DEL {}\n", bytes_to_str(&key));
-                    let _ = db.aof_tx.send(log).await;
-                    write_buffer.extend_from_slice(b":1\r\n");
-                } else {
-                    write_buffer.extend_from_slice(b":0\r\n");
-                }
-            }
-            Command::Exists(key) => {
-                let map = db.read_shard(&key).await;
-                if map.contains_key(&key) {
-                    write_buffer.extend_from_slice(b":1\r\n");
-                } else {
-                    write_buffer.extend_from_slice(b":0\r\n");
-                }
             }
             Command::Type(key) => {
                 let map = db.read_shard(&key).await;
@@ -316,6 +251,82 @@ async fn handle_connection(
                     None => write_buffer.extend_from_slice(b":-2\r\n"),
                 }
             }
+            Command::SetEx(key, seconds, value) => {
+                let expiration_time = SystemTime::now() + Duration::from_secs(seconds as u64);
+                let new_entry = Entry {
+                    value: crate::engine::DataType::String(value.clone()),
+                    expires_at: Some(expiration_time),
+                };
+                let mut map = db.write_shard(&key).await;
+                map.insert(key.clone(), new_entry);
+
+                // Ship to AOF worker
+                let log = format!("SETEX {} {} {}\n", bytes_to_str(&key), seconds, bytes_to_str(&value));
+                let _ = db.aof_tx.send(log).await;
+                write_buffer.extend_from_slice(b"+OK\r\n");
+            }
+            Command::Ping => {
+                write_buffer.extend_from_slice(b"+PONG\r\n");
+            }
+            Command::Set(key, value) => {
+                let mut shard = db.write_shard(&key).await;
+                shard.insert(key.clone(), Entry {
+                    value: engine::DataType::String(value.clone()),
+                    expires_at: None,
+                });
+                let log = format!("SET {} {}\n", bytes_to_str(&key), bytes_to_str(&value));
+                let _ = db.aof_tx.send(log).await;
+                write_buffer.extend_from_slice(b"+OK\r\n");
+            }
+            Command::Get(key) => {
+                let mut map = db.write_shard(&key).await;
+                let mut expired = false;
+
+                // Lazy deletion check: If the key is requested but is past its expiry, delete it now.
+                if let Some(entry) = map.get(&key) {
+                    if let Some(expiration) = entry.expires_at {
+                        if SystemTime::now() > expiration {
+                            expired = true;
+                        }
+                    }
+                }
+
+                if expired {
+                    if map.remove(&key).is_some() {
+                        let log = format!("DEL {}\n", bytes_to_str(&key));
+                        let _ = db.aof_tx.send(log).await;
+                    }
+                    write_buffer.extend_from_slice(b"$-1\r\n");
+                } else {
+                    match map.get(&key) {
+                        Some(entry) => match &entry.value {
+                            crate::engine::DataType::String(val) => {
+                                write_bulk!(write_buffer, val);
+                            }
+                            _ => write_buffer.extend_from_slice(b"-WRONGTYPE Operation against a key holding the wrong type of value\r\n"),
+                        },
+                        None => write_buffer.extend_from_slice(b"$-1\r\n"),
+                    }
+                }
+            }
+            Command::Del(key) => {
+                let mut map = db.write_shard(&key).await;
+                if map.remove(&key).is_some() {
+                    let log = format!("DEL {}\n", bytes_to_str(&key));
+                    let _ = db.aof_tx.send(log).await;
+                    write_buffer.extend_from_slice(b":1\r\n");
+                } else {
+                    write_buffer.extend_from_slice(b":0\r\n");
+                }
+            }
+            Command::Exists(key) => {
+                let map = db.read_shard(&key).await;
+                if map.contains_key(&key) {
+                    write_buffer.extend_from_slice(b":1\r\n");
+                } else {
+                    write_buffer.extend_from_slice(b":0\r\n");
+                }
+            }
             Command::Incr(key) => {
                 let mut map = db.write_shard(&key).await;
                 let mut error = None;
@@ -351,30 +362,8 @@ async fn handle_connection(
 
                     let log = format!("INCR {}\n", bytes_to_str(&key));
                     let _ = db.aof_tx.send(log).await;
-
                     write!(&mut write_buffer, ":{}\r\n", new_num).unwrap();
                 }
-            }
-            Command::Publish(channel, message) => {
-                // FLUSH BEFORE HANDOFF
-                if !write_buffer.is_empty() {
-                    let _ = stream.write_all(&write_buffer).await;
-                    write_buffer.clear();
-                }
-                crate::pubsub::handle_publish(&pubsub, bytes_to_str(&channel), bytes_to_str(&message), &mut stream).await;
-            }
-            Command::Subscribe(channel) => {
-                // FLUSH BEFORE HANDOFF
-                if !write_buffer.is_empty() {
-                    let _ = stream.write_all(&write_buffer).await;
-                    write_buffer.clear();
-                }
-                crate::pubsub::handle_subscribe(&pubsub, bytes_to_str(&channel), &mut stream, &mut reader).await;
-                break;
-            }
-            Command::Unsubscribe(channel) => {
-                let ch = bytes_to_str(&channel);
-                write!(&mut write_buffer, "*3\r\n$11\r\nunsubscribe\r\n${}\r\n{}\r\n:0\r\n", channel.len(), ch).unwrap();
             }
             Command::LPush(key, value) => {
                 let mut map = db.write_shard(&key).await;
@@ -387,10 +376,8 @@ async fn handle_connection(
                     crate::engine::DataType::List(list) => {
                         list.push_front(value.clone());
                         let len = list.len();
-
                         let log = format!("LPUSH {} \"{}\"\n", bytes_to_str(&key), bytes_to_str(&value));
                         let _ = db.aof_tx.send(log).await;
-
                         write!(&mut write_buffer, ":{}\r\n", len).unwrap();
                     }
                     _ => write_buffer.extend_from_slice(b"-WRONGTYPE Operation against a key holding the wrong kind of value \r\n"),
@@ -413,6 +400,21 @@ async fn handle_connection(
                     }
                 } else {
                     write_buffer.extend_from_slice(b"$-1\r\n");
+                }
+            }
+            Command::RPush(key, value) => {
+                let mut map = db.write_shard(&key).await;
+                let entry = map.entry(key.clone()).or_insert_with(|| Entry {
+                    value: crate::engine::DataType::List(std::collections::VecDeque::new()),
+                    expires_at: None,
+                });
+
+                if let crate::engine::DataType::List(list) = &mut entry.value {
+                    list.push_back(value.clone());
+                    let len = list.len();
+                    let log = format!("RPUSH {} \"{}\"\n", bytes_to_str(&key), bytes_to_str(&value));
+                    let _ = db.aof_tx.send(log).await;
+                    write!(&mut write_buffer, ":{}\r\n", len).unwrap();
                 }
             }
             Command::RPop(key) => {
@@ -496,23 +498,6 @@ async fn handle_connection(
                     write_buffer.extend_from_slice(b"*0\r\n");
                 }
             }
-            Command::RPush(key, value) => {
-                let mut map = db.write_shard(&key).await;
-                let entry = map.entry(key.clone()).or_insert_with(|| Entry {
-                    value: crate::engine::DataType::List(std::collections::VecDeque::new()),
-                    expires_at: None,
-                });
-
-                if let crate::engine::DataType::List(list) = &mut entry.value {
-                    list.push_back(value.clone());
-                    let len = list.len();
-
-                    let log = format!("RPUSH {} \"{}\"\n", bytes_to_str(&key), bytes_to_str(&value));
-                    let _ = db.aof_tx.send(log).await;
-
-                    write!(&mut write_buffer, ":{}\r\n", len).unwrap();
-                }
-            }
             Command::HSet(key, field, value) => {
                 let mut map = db.write_shard(&key).await;
                 let entry = map.entry(key.clone()).or_insert_with(|| Entry {
@@ -522,10 +507,8 @@ async fn handle_connection(
                 
                 if let crate::engine::DataType::Hash(hmap) = &mut entry.value {
                     hmap.insert(field.clone(), value.clone());
-
                     let log = format!("HSET {} {} \"{}\"\n", bytes_to_str(&key), bytes_to_str(&field), bytes_to_str(&value));
                     let _ = db.aof_tx.send(log).await;
-
                     write_buffer.extend_from_slice(b"+OK\r\n");
                 } else {
                     write_buffer.extend_from_slice(b"-WRONGTYPE\r\n");
@@ -672,7 +655,6 @@ async fn handle_connection(
             Command::SAdd(key, member) => {
                 let mut shard = db.write_shard(&key).await;
                 let mut added = 0;
-
                 let entry = shard.entry(key.clone()).or_insert_with(|| crate::engine::Entry {
                     value: crate::engine::DataType::Set(std::collections::HashSet::new()),
                     expires_at: None,
@@ -685,7 +667,6 @@ async fn handle_connection(
                         let _ = db.aof_tx.send(log).await;
                     }
                 }
-
                 write!(&mut write_buffer, ":{}\r\n", added).unwrap();
             }
             Command::SMembers(key) => {
@@ -801,7 +782,6 @@ async fn handle_connection(
                     write_buffer.extend_from_slice(b"*2\r\n$1\r\n0\r\n*0\r\n");
                 } else {
                     let mut keys = db.scan_shard(cursor).await;
-
                     if let Some(pattern) = match_pattern {
                         let pattern_str = bytes_to_str(&pattern);
                         let regex_string = format!("^{}$", pattern_str.replace("*", ".*").replace("?", "."));
@@ -809,10 +789,8 @@ async fn handle_connection(
                             keys.retain(|key| std::str::from_utf8(key).map(|s| matcher.is_match(s)).unwrap_or(false));
                         }
                     }
-
                     let next_cursor = if cursor == 63 { 0 } else { cursor + 1 };
                     let next_cursor_str = next_cursor.to_string();
-
                     write!(&mut write_buffer, "*2\r\n${}\r\n{}\r\n*{}\r\n", next_cursor_str.len(), next_cursor_str, keys.len()).unwrap();
                     for key in &keys {
                         write!(&mut write_buffer, "${}\r\n", key.len()).unwrap();
@@ -821,12 +799,28 @@ async fn handle_connection(
                     }
                 }
             }
-            Command::Monitor => {
-                // FLUSH BEFORE ENTERING MONITOR LOOP
-                write_buffer.extend_from_slice(b"+OK\r\n");
-                if stream.write_all(&write_buffer).await.is_err() {
-                    break;
+            Command::Publish(channel, message) => {
+                if !write_buffer.is_empty() {
+                    let _ = stream.write_all(&write_buffer).await;
+                    write_buffer.clear();
                 }
+                crate::pubsub::handle_publish(&pubsub, bytes_to_str(&channel), bytes_to_str(&message), &mut stream).await;
+            }
+            Command::Subscribe(channel) => {
+                if !write_buffer.is_empty() {
+                    let _ = stream.write_all(&write_buffer).await;
+                    write_buffer.clear();
+                }
+                crate::pubsub::handle_subscribe(&pubsub, bytes_to_str(&channel), &mut stream, &mut reader).await;
+                break;
+            }
+            Command::Unsubscribe(channel) => {
+                crate::log_debug!("PubSub", "Client unsubscribed from: {}", bytes_to_str(&channel));
+                write_buffer.extend_from_slice(b"+OK\r\n");
+            }
+            Command::Monitor => {
+                write_buffer.extend_from_slice(b"+OK\r\n");
+                if stream.write_all(&write_buffer).await.is_err() { break; }
                 write_buffer.clear();
 
                 let mut rx = db.tx.subscribe();
@@ -834,27 +828,32 @@ async fn handle_connection(
                     match rx.recv().await {
                         Ok(msg) => {
                             let response = format!("+{}\r\n", msg);
-                            if stream.write_all(response.as_bytes()).await.is_err() {
-                                break;
-                            }
+                            if stream.write_all(response.as_bytes()).await.is_err() { break; }
                         }
                         Err(_) => break,
                     }
                 }
-                break; // Monitor permanently hijacks the connection, so break out when done
+                break;
             }
             _ => {
                 write_buffer.extend_from_slice(b"-ERR unknown command\r\n");
             }
         }
+
+        // 5. FINALIZE RESPONSE
+        if !write_buffer.is_empty() {
+            let _ = stream.write_all(&write_buffer).await;
+            write_buffer.clear();
+        }
     }
 }
 
+/// Start the TCP Listener and accept loop.
 pub async fn run(address: &str, db: Db, pubsub: PubSub, config: Config) {
     let listener = TcpListener::bind(address).await.expect("Could not bind to address");
     crate::log_success!("Server", "Titan KV natively deployed and listening on {}", address);
+    
     let shared_password = Arc::new(config.requirepass);
-
     let active_clients = Arc::new(Mutex::new(HashMap::new()));
 
     loop {
@@ -865,6 +864,7 @@ pub async fn run(address: &str, db: Db, pubsub: PubSub, config: Config) {
                 let db_handle = db.clone();
                 let pubsub_handle = Arc::clone(&pubsub);
                 let clients_handle = active_clients.clone();
+                let pass_handle = shared_password.clone();
 
                 let client_id = NEXT_CLIENT_ID.fetch_add(1, Ordering::Relaxed);
                 {
@@ -876,7 +876,8 @@ pub async fn run(address: &str, db: Db, pubsub: PubSub, config: Config) {
                     });
                 }
 
-                let pass_handle = shared_password.clone();
+                // Spawn a lightweight Tokio task for the client.
+                // Titan KV handles thousands of concurrent tasks efficiently via work-stealing.
                 tokio::spawn(async move {
                     handle_connection(stream, db_handle, pubsub_handle, socket_addr, clients_handle, pass_handle).await;
                 });

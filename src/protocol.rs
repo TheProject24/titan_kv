@@ -1,8 +1,19 @@
 // src/protocol.rs
+//! Titan KV RESP Protocol & Tokenization
+//! 
+//! This module implements the Redis Serialization Protocol (RESP).
+//! RESP is a binary-safe text protocol that uses prefixes to identify types:
+//! - '*' for Arrays (Aggregate commands)
+//! - '$' for Bulk Strings (Binary safe data)
+//! - '+' for Simple Strings (Simple OK responses)
+//! - ':' for Integers
+//! - '-' for Errors
 
 use bytes::Bytes;
 use tokio::io::AsyncReadExt;
 
+/// Every supported command in Titan KV has a variant here.
+/// Using an Enum allows for efficient pattern matching and type-safe data handling.
 #[derive(Debug)]
 pub enum Command {
     Auth(String),
@@ -24,21 +35,21 @@ pub enum Command {
     LRem(Bytes, i64, Bytes),
     LTrim(Bytes, i32, i32),
     LRange(Bytes, i32, i32),
-    MGet(Bytes, Bytes),
-    SAdd(Bytes, Bytes),
-    SInter(Bytes, Bytes),
     HSet(Bytes, Bytes, Bytes),
     HGetAll(Bytes),
     HGet(Bytes, Bytes),
+    MGet(Bytes, Bytes),
+    SAdd(Bytes, Bytes),
+    SInter(Bytes, Bytes),
     Keys(Bytes),
     Scan(usize, Option<Bytes>),
     Info,
     Type(Bytes),
     Ttl(Bytes),
+    Pttl(Bytes),
     ClientList,
     Client,
     Monitor,
-    Pttl(Bytes),
     Memory,
     Llen(Bytes),
     Hlen(Bytes),
@@ -49,12 +60,13 @@ pub enum Command {
     Unknown,
 }
 
+/// Dispatches a list of raw byte segments into a structured Command enum.
 pub fn parse_command(parts: &[Bytes]) -> Command {
     if parts.is_empty() {
         return Command::Unknown;
     }
 
-    // Uppercase only the command verb — stack-allocated for short names
+    // Convert only the first part (the command verb) to uppercase for case-insensitive matching.
     let cmd: Vec<u8> = parts[0].iter().map(|b| b.to_ascii_uppercase()).collect();
 
     match cmd.as_slice() {
@@ -102,8 +114,7 @@ pub fn parse_command(parts: &[Bytes]) -> Command {
                 _ => Command::Unknown,
             }
         }
-        b"HSET" if parts.len() == 4 =>
-            Command::HSet(parts[1].clone(), parts[2].clone(), parts[3].clone()),
+        b"HSET" if parts.len() == 4 => Command::HSet(parts[1].clone(), parts[2].clone(), parts[3].clone()),
         b"HGETALL" if parts.len() == 2 => Command::HGetAll(parts[1].clone()),
         b"HGET" if parts.len() == 3 => Command::HGet(parts[1].clone(), parts[2].clone()),
         b"MGET" if parts.len() == 3 => Command::MGet(parts[1].clone(), parts[2].clone()),
@@ -148,7 +159,8 @@ pub fn parse_command(parts: &[Bytes]) -> Command {
     }
 }
 
-// Bytes::from(String) is zero-copy — it takes ownership of the string's heap buffer.
+/// Simple space-delimited tokenizer for non-RESP commands (like those from 'nc' or telnet).
+/// Supports quoted strings for values containing spaces.
 pub fn tokenize(input: &str) -> Vec<Bytes> {
     let mut tokens = Vec::new();
     let mut current = String::new();
@@ -156,36 +168,35 @@ pub fn tokenize(input: &str) -> Vec<Bytes> {
 
     for ch in input.chars() {
         match ch {
-            '"' => {
-                in_quotes = !in_quotes;
-            }
+            '"' => { in_quotes = !in_quotes; }
             ' ' | '\t' | '\n' if !in_quotes => {
                 if !current.is_empty() {
                     tokens.push(Bytes::from(std::mem::take(&mut current)));
                 }
             }
-            _ => {
-                current.push(ch);
-            }
+            _ => { current.push(ch); }
         }
     }
-
-    if !current.is_empty() {
-        tokens.push(Bytes::from(current));
-    }
+    if !current.is_empty() { tokens.push(Bytes::from(current)); }
     tokens
 }
 
+/// Asynchronously reads and decodes a RESP array from the socket.
+/// Titan KV uses Bytes::copy_from_slice to ensure that the data buffer 
+/// is reference-counted (Arc). This means 'cloning' a key throughout the 
+/// engine is O(1) and never copies the actual string bytes.
 pub async fn read_resp<R: tokio::io::AsyncBufReadExt + Unpin>(
     reader: &mut R,
 ) -> Result<Vec<Bytes>, Box<dyn std::error::Error>> {
     let mut line = String::new();
     reader.read_line(&mut line).await?;
 
+    // If it doesn't start with '*', assume it's a raw text command (telnet/nc style).
     if !line.starts_with('*') {
         return Ok(crate::protocol::tokenize(&line));
     }
 
+    // Case: RESP Array (*<count>\r\n)
     let count = line.trim_start_matches('*').trim().parse::<usize>()?;
     let mut args = Vec::with_capacity(count);
 
@@ -193,13 +204,15 @@ pub async fn read_resp<R: tokio::io::AsyncBufReadExt + Unpin>(
         let mut len_line = String::new();
         reader.read_line(&mut len_line).await?;
 
+        // Expect Bulk String header ($<len>\r\n)
         if !len_line.starts_with('$') { continue; }
         let len = len_line.trim_start_matches('$').trim().parse::<usize>()?;
 
+        // Read exactly 'len' bytes plus the trailing CRLF (\r\n)
         let mut buf = vec![0u8; len + 2];
         reader.read_exact(&mut buf).await?;
 
-        // One allocation here; every subsequent clone throughout the pipeline is O(1).
+        // Shared ownership allocation.
         let arg = Bytes::copy_from_slice(&buf[..len]);
         args.push(arg);
     }
