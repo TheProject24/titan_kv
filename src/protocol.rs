@@ -58,7 +58,7 @@ pub fn parse_command(parts: &[Bytes]) -> Command {
     let cmd: Vec<u8> = parts[0].iter().map(|b| b.to_ascii_uppercase()).collect();
 
     match cmd.as_slice() {
-        b"AUTH" if parts.len() == 2 => Command::Auth(parts[1].string()),
+        b"AUTH" if parts.len() == 2 => Command::Auth(String::from_utf8_lossy(&parts[1]).to_string()),
         b"PING" => Command::Ping,
         b"GET" if parts.len() == 2 => Command::Get(parts[1].clone()),
         b"SET" if parts.len() == 3 => Command::Set(parts[1].clone(), parts[2].clone()),

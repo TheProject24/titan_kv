@@ -14,7 +14,7 @@ use std::time::{ SystemTime, UNIX_EPOCH };
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use bytes::Bytes;
-use crate::config::{self, Config};
+use crate::config::Config;
 use subtle::ConstantTimeEq;
 
 #[derive(PartialEq)]
@@ -122,10 +122,10 @@ async fn handle_connection(
         if state == ConnectionState::Unauthorized {
             match command {
                 Command::Auth(provided_password) => {
-                    let actual_password = requirepass.as_ref().unwrap();
+                    let actual_password = requirepass.as_deref().unwrap();
 
                     // Security: Constant-time comparison
-                    if provided_password.as_ref().ct_eq(actual_password.as_bytes()).into() {
+                    if provided_password.as_bytes().ct_eq(actual_password.as_bytes()).into() {
                         state = ConnectionState::Authenticated;
                         write_buffer.extend_from_slice(b"+OK\r\n");
                     } else {
@@ -263,6 +263,57 @@ async fn handle_connection(
                     write_buffer.extend_from_slice(b":1\r\n");
                 } else {
                     write_buffer.extend_from_slice(b":0\r\n");
+                }
+            }
+            Command::Type(key) => {
+                let map = db.read_shard(&key).await;
+                match map.get(&key) {
+                    Some(entry) => {
+                        let type_str = match &entry.value {
+                            crate::engine::DataType::String(_) => "string",
+                            crate::engine::DataType::List(_) => "list",
+                            crate::engine::DataType::Hash(_) => "hash",
+                            crate::engine::DataType::Set(_) => "set",
+                        };
+                        write!(&mut write_buffer, "+{}\r\n", type_str).unwrap();
+                    }
+                    None => write_buffer.extend_from_slice(b"+none\r\n"),
+                }
+            }
+            Command::Ttl(key) => {
+                let map = db.read_shard(&key).await;
+                match map.get(&key) {
+                    Some(entry) => match entry.expires_at {
+                        Some(expiration) => {
+                            let now = SystemTime::now();
+                            if now >= expiration {
+                                write_buffer.extend_from_slice(b":-2\r\n");
+                            } else {
+                                let duration = expiration.duration_since(now).unwrap_or_default();
+                                write!(&mut write_buffer, ":{}\r\n", duration.as_secs()).unwrap();
+                            }
+                        }
+                        None => write_buffer.extend_from_slice(b":-1\r\n"),
+                    },
+                    None => write_buffer.extend_from_slice(b":-2\r\n"),
+                }
+            }
+            Command::Pttl(key) => {
+                let map = db.read_shard(&key).await;
+                match map.get(&key) {
+                    Some(entry) => match entry.expires_at {
+                        Some(expiration) => {
+                            let now = SystemTime::now();
+                            if now >= expiration {
+                                write_buffer.extend_from_slice(b":-2\r\n");
+                            } else {
+                                let duration = expiration.duration_since(now).unwrap_or_default();
+                                write!(&mut write_buffer, ":{}\r\n", duration.as_millis()).unwrap();
+                            }
+                        }
+                        None => write_buffer.extend_from_slice(b":-1\r\n"),
+                    },
+                    None => write_buffer.extend_from_slice(b":-2\r\n"),
                 }
             }
             Command::Incr(key) => {
@@ -637,6 +688,57 @@ async fn handle_connection(
 
                 write!(&mut write_buffer, ":{}\r\n", added).unwrap();
             }
+            Command::SMembers(key) => {
+                let shard = db.read_shard(&key).await;
+                match shard.get(&key) {
+                    Some(entry) => match &entry.value {
+                        crate::engine::DataType::Set(set) => {
+                            write!(&mut write_buffer, "*{}\r\n", set.len()).unwrap();
+                            for member in set {
+                                write_bulk!(write_buffer, member);
+                            }
+                        }
+                        _ => write_buffer.extend_from_slice(b"-WRONGTYPE\r\n"),
+                    },
+                    None => write_buffer.extend_from_slice(b"*0\r\n"),
+                }
+            }
+            Command::Scard(key) => {
+                let shard = db.read_shard(&key).await;
+                match shard.get(&key) {
+                    Some(entry) => match &entry.value {
+                        crate::engine::DataType::Set(set) => {
+                            write!(&mut write_buffer, ":{}\r\n", set.len()).unwrap();
+                        }
+                        _ => write_buffer.extend_from_slice(b"-WRONGTYPE\r\n"),
+                    },
+                    None => write_buffer.extend_from_slice(b":0\r\n"),
+                }
+            }
+            Command::Llen(key) => {
+                let shard = db.read_shard(&key).await;
+                match shard.get(&key) {
+                    Some(entry) => match &entry.value {
+                        crate::engine::DataType::List(list) => {
+                            write!(&mut write_buffer, ":{}\r\n", list.len()).unwrap();
+                        }
+                        _ => write_buffer.extend_from_slice(b"-WRONGTYPE\r\n"),
+                    },
+                    None => write_buffer.extend_from_slice(b":0\r\n"),
+                }
+            }
+            Command::Hlen(key) => {
+                let shard = db.read_shard(&key).await;
+                match shard.get(&key) {
+                    Some(entry) => match &entry.value {
+                        crate::engine::DataType::Hash(hmap) => {
+                            write!(&mut write_buffer, ":{}\r\n", hmap.len()).unwrap();
+                        }
+                        _ => write_buffer.extend_from_slice(b"-WRONGTYPE\r\n"),
+                    },
+                    None => write_buffer.extend_from_slice(b":0\r\n"),
+                }
+            }
             Command::SInter(key_a, key_b) => {
                 let mut set_a = std::collections::HashSet::<Bytes>::new();
                 let mut set_b = std::collections::HashSet::<Bytes>::new();
@@ -774,8 +876,9 @@ pub async fn run(address: &str, db: Db, pubsub: PubSub, config: Config) {
                     });
                 }
 
+                let pass_handle = shared_password.clone();
                 tokio::spawn(async move {
-                    handle_connection(stream, db_handle, pubsub_handle, socket_addr, clients_handle, requirepass).await;
+                    handle_connection(stream, db_handle, pubsub_handle, socket_addr, clients_handle, pass_handle).await;
                 });
             }
             Err(e) => {
