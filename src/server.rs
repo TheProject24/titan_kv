@@ -1619,6 +1619,104 @@ match command {
     }
 
     // ----------------------------------------------------------
+    // INFO [section]
+    // Returns server metadata in Redis INFO format.
+    // Each section is a block of key:value pairs separated by \r\n.
+    // This is required by most Redis client libraries (including
+    // the node `redis` package) which call INFO on connect to
+    // negotiate protocol features.
+    //
+    // We return the most important sections: server, clients,
+    // memory, stats, replication, and keyspace — enough to
+    // satisfy client library handshakes and health checks.
+    // ----------------------------------------------------------
+    Command::Info => {
+        // Count total keys across all shards.
+        let total_keys: usize = {
+            let mut count = 0usize;
+            for i in 0..db.get_shard_count() {
+                let shard = db.read_shard_by_index(i).await;
+                count += shard.len();
+            }
+            count
+        };
+
+        let num_clients = {
+            active_clients.lock().unwrap().len()
+        };
+
+        let uptime_secs = 0u64; // placeholder — no global start time stored yet
+
+        let info = format!(
+            "# Server\r\n\
+             redis_version:7.0.0\r\n\
+             titan_version:3.0.0\r\n\
+             redis_mode:standalone\r\n\
+             os:{}\r\n\
+             arch_bits:64\r\n\
+             tcp_port:6379\r\n\
+             uptime_in_seconds:{}\r\n\
+             uptime_in_days:{}\r\n\
+             hz:10\r\n\
+             executable:titan_kv\r\n\
+             \r\n\
+             # Clients\r\n\
+             connected_clients:{}\r\n\
+             blocked_clients:0\r\n\
+             \r\n\
+             # Memory\r\n\
+             used_memory:0\r\n\
+             used_memory_human:0B\r\n\
+             maxmemory:0\r\n\
+             maxmemory_human:0B\r\n\
+             maxmemory_policy:noeviction\r\n\
+             \r\n\
+             # Stats\r\n\
+             total_commands_processed:0\r\n\
+             total_connections_received:0\r\n\
+             \r\n\
+             # Replication\r\n\
+             role:master\r\n\
+             connected_slaves:0\r\n\
+             master_replid:0000000000000000000000000000000000000000\r\n\
+             master_repl_offset:0\r\n\
+             \r\n\
+             # Keyspace\r\n\
+             db0:keys={},expires=0,avg_ttl=0\r\n",
+            std::env::consts::OS,
+            uptime_secs,
+            uptime_secs / 86400,
+            num_clients,
+            total_keys,
+        );
+
+        // Encode as RESP bulk string.
+        write!(&mut write_buffer, "${}\r\n{}\r\n", info.len(), info).unwrap();
+    }
+
+    // ----------------------------------------------------------
+    // MEMORY USAGE <key>
+    // Returns an approximate memory usage for a key in bytes.
+    // We return a fixed stub value of 64 bytes — enough for
+    // client libraries that call MEMORY USAGE during health
+    // checks, without requiring us to implement full memory
+    // accounting.
+    // ----------------------------------------------------------
+    Command::Memory => {
+        write_buffer.extend_from_slice(b":64\r\n");
+    }
+
+    // ----------------------------------------------------------
+    // CLIENT (subcommand not matched by CLIENT LIST)
+    // Handles CLIENT SETNAME, CLIENT GETNAME, CLIENT ID, etc.
+    // We return a simple +OK or placeholder so client libraries
+    // that call CLIENT SETNAME on connect don't error out.
+    // ----------------------------------------------------------
+    Command::Client => {
+        write_buffer.extend_from_slice(b"+OK\r\n");
+    }
+
+    // ----------------------------------------------------------
     // CATCH-ALL
     // Any command that reaches here was parsed successfully but has
     // no handler implemented. This could be a valid Redis command

@@ -44,7 +44,7 @@
     "statusBar.debuggingBackground": "#7df207",
     "statusBar.debuggingForeground": "#000000",
     "statusBar.debuggingBorder": "#7df207"
-  },
+},
   "peacock.color": "#ff3d00",
   "projectColors.mainColor": "#7df207",
   "window.title": "titan_kv"
