@@ -661,7 +661,7 @@ footer span { color: var(--rust); }
       <div class="card-icon ic-c">🌐</div>
       <div class="card-title">server.rs</div>
       <div class="card-file">The Listener</div>
-      <div class="card-body">A Tokio <code>TcpListener</code> accepts connections in a tight loop. Each accepted connection is handed off to <code>tokio::spawn</code>, giving every client its own lightweight async task. Manages RESP input, command dispatch against the sharded DB, AOF writes, and response serialization for all <strong style="color:var(--text)">41 commands</strong>. Thread-safety is strictly maintained by dropping <code>MutexGuard</code>s before async yields.</div>
+      <div class="card-body">A Tokio <code>TcpListener</code> accepts connections in a tight loop. Each accepted connection is handed off to <code>tokio::spawn</code>, giving every client its own lightweight async task. Manages RESP input, command dispatch against the sharded DB, AOF writes, and response serialization for all <strong style="color:var(--text)">44 commands</strong>. Thread-safety is strictly maintained by dropping <code>MutexGuard</code>s before async yields.</div>
     </div>
     <div class="card">
       <div class="card-icon ic-p">⟨/⟩</div>
@@ -755,10 +755,10 @@ footer span { color: var(--rust); }
 <section id="commands" class="fi">
   <div class="sec-num">05 / Reference</div>
   <h2 class="sec-title">Command Reference</h2>
-  <p class="sec-sub">41 commands across 6 categories. All follow the Redis RESP protocol — connect with any existing Redis client, unchanged.</p>
+  <p class="sec-sub">44 commands across 6 categories. All follow the Redis RESP protocol — connect with any existing Redis client, unchanged.</p>
 
   <div class="cmd-tabs">
-    <button class="cmd-tab on"  data-cat="all">All (41)</button>
+    <button class="cmd-tab on"  data-cat="all">All (44)</button>
     <button class="cmd-tab"     data-cat="keys">Keys / General</button>
     <button class="cmd-tab"     data-cat="lists">Lists</button>
     <button class="cmd-tab"     data-cat="hashes">Hashes</button>
@@ -805,11 +805,12 @@ footer span { color: var(--rust); }
         <tr class="cmd-row show" data-cat="pubsub"> <td><span class="cn">PUBLISH</span></td>      <td><span class="cs">PUBLISH channel msg</span></td>           <td><span class="cr">:&lt;receivers&gt;</span></td>               <td><span class="cn2">Push message into broadcast channel</span></td></tr>
         <tr class="cmd-row show" data-cat="pubsub"> <td><span class="cn">SUBSCRIBE</span></td>    <td><span class="cs">SUBSCRIBE channel</span></td>             <td><span class="cr">*3\r\n...</span></td>                      <td><span class="cn2">Listen for broadcasts; blocks connection</span></td></tr>
         <tr class="cmd-row show" data-cat="pubsub"> <td><span class="cn">UNSUBSCRIBE</span></td>  <td><span class="cs">UNSUBSCRIBE channel</span></td>           <td><span class="cr">*3\r\n...</span></td>                      <td><span class="cn2">End a subscription</span></td></tr>
-        <tr class="cmd-row show" data-cat="server"> <td><span class="cn">INFO</span><span class="cmd-new">NEW</span></td>         <td><span class="cs">INFO</span></td>                          <td><span class="cr">$&lt;len&gt;\r\n...</span></td>              <td><span class="cn2">Get server information and stats</span></td></tr>
+        <tr class="cmd-row show" data-cat="server"> <td><span class="cn">INFO</span><span class="cmd-new">NEW</span></td>         <td><span class="cs">INFO</span></td>                          <td><span class="cr">$&lt;len&gt;\r\n...</span></td>              <td><span class="cn2">Returns Redis-style server, client, memory, stats, replication, and keyspace sections</span></td></tr>
         <tr class="cmd-row show" data-cat="server"> <td><span class="cn">DBSIZE</span><span class="cmd-new">NEW</span></td>       <td><span class="cs">DBSIZE</span></td>                        <td><span class="cr">:&lt;len&gt;</span></td>                      <td><span class="cn2">Return number of keys in the selected DB</span></td></tr>
         <tr class="cmd-row show" data-cat="server"> <td><span class="cn">MONITOR</span><span class="cmd-new">NEW</span></td>      <td><span class="cs">MONITOR</span></td>                       <td><span class="cr">+OK</span></td>                         <td><span class="cn2">Stream all processed commands in real-time</span></td></tr>
         <tr class="cmd-row show" data-cat="server"> <td><span class="cn">CLIENT LIST</span><span class="cmd-new">NEW</span></td>  <td><span class="cs">CLIENT LIST</span></td>                   <td><span class="cr">$&lt;len&gt;\r\n...</span></td>              <td><span class="cn2">Get list of client connections</span></td></tr>
-        <tr class="cmd-row show" data-cat="server"> <td><span class="cn">MEMORY USAGE</span><span class="cmd-new">NEW</span></td> <td><span class="cs">MEMORY USAGE key</span></td>              <td><span class="cr">:&lt;bytes&gt;</span></td>                    <td><span class="cn2">Estimate memory used by key</span></td></tr>
+        <tr class="cmd-row show" data-cat="server"> <td><span class="cn">MEMORY USAGE</span><span class="cmd-new">NEW</span></td> <td><span class="cs">MEMORY USAGE key</span></td>              <td><span class="cr">:&lt;bytes&gt;</span></td>                    <td><span class="cn2">Stubbed memory check used by client libraries</span></td></tr>
+        <tr class="cmd-row show" data-cat="server"> <td><span class="cn">CLIENT</span><span class="cmd-new">NEW</span></td>        <td><span class="cs">CLIENT subcmd</span></td>                 <td><span class="cr">+OK</span></td>                         <td><span class="cn2">Covers CLIENT SETNAME, GETNAME, ID, and similar subcommands</span></td></tr>
       </tbody>
     </table>
   </div>

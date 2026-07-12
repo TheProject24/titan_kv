@@ -110,7 +110,7 @@ Multi-element responses (HGETALL, LRANGE, SMEMBERS, KEYS, SCAN) are built direct
 
 A complete RESP-compatible command reader and parser. `read_resp()` allocates each argument once from the network buffer as `Bytes::copy_from_slice()`. Every subsequent operation on that data — through `parse_command`, into the `Command` enum, into the shard `HashMap` — is an **O(1) reference-count clone**. No heap copy occurs after the initial read.
 
-The strongly-typed `Command` enum carries `Bytes` fields for all string arguments, covering scalar types, lists, hashes, pubsub operations, and the queue primitives `RPOPLPUSH` and `LREM`, plus server commands like `CLIENT LIST`, `MONITOR`, `DBSIZE`, and `MEMORY USAGE`.
+The strongly-typed `Command` enum carries `Bytes` fields for all string arguments, covering scalar types, lists, hashes, pubsub operations, and the queue primitives `RPOPLPUSH` and `LREM`, plus server commands like `INFO`, `CLIENT LIST`, `CLIENT`, `DBSIZE`, and `MEMORY USAGE`.
 
 ### `pubsub.rs` — Event Broker
 
@@ -179,11 +179,12 @@ Before Tokio took over async dispatch, Titan KV shipped a fully hand-rolled OS t
 | `SUBSCRIBE`        | `SUBSCRIBE channel`       | `*3\r\n...`                | Listen for broadcasts indefinitely                     |
 | `UNSUBSCRIBE`      | `UNSUBSCRIBE channel`     | `*3\r\n...`                | End a subscription                                     |
 | **Server**         |                           |                            |                                                        |
-| `INFO`             | `INFO`                    | `$<len>\r\n...`            | Get server information and stats                       |
+| `INFO`             | `INFO`                    | `$<len>\r\n...`            | Returns Redis-style server, client, memory, stats, replication, and keyspace sections |
 | `DBSIZE`           | `DBSIZE`                  | `:<len>`                   | Return number of keys in the selected DB               |
 | `MONITOR`          | `MONITOR`                 | `+OK`                      | Stream all processed commands in real-time             |
 | `CLIENT LIST`      | `CLIENT LIST`             | `$<len>\r\n...`            | Get list of client connections                         |
-| `MEMORY USAGE`     | `MEMORY USAGE key`        | `:<bytes>`                 | Estimate memory used by key                            |
+| `MEMORY USAGE`     | `MEMORY USAGE key`        | `:<bytes>`                 | Stubbed memory check used by client libraries          |
+| `CLIENT`           | `CLIENT subcmd`           | `+OK`                      | Covers CLIENT SETNAME, GETNAME, ID, and similar subcommands |
 
 ---
 
